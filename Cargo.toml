@@ -1,0 +1,11 @@
+[package]
+name = "briny_ai"
+version = "0.1.0"
+edition = "2024"
+description = "Minimal autodiff + tensor engine with serialization"
+license = "MIT"
+documentation = "https://docs.rs/briny_ai"
+keywords = ["autograd", "tensor", "machine-learning"]
+categories = ["science", "mathematics", "data-structures"]
+repository = "https://github.com/bobbothe2nd/briny_ai"
+readme = "README.md"
