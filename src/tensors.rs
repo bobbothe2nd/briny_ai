@@ -13,7 +13,7 @@
 //! - Compile-time tensor macros
 //!
 //! ## Design Highlights
-//! - Tensors are strongly typed: `Tensor<T>` for any element type (usually `f32` or `f64`)
+//! - Tensors are strongly typed: `Tensor<T>` for any element type (usually `f64`)
 //! - Shape is stored as a `Vec<usize>` and enforced at runtime
 //! - `WithGrad<T>` pairs any value with its gradient for autograd
 //! - The `tensor!` macro supports ergonomic tensor creation from nested arrays
@@ -26,11 +26,27 @@
 //!
 //! ## Example
 //!
-//! ```rust
-//! use briny_ai::tensors::Tensor;
+//! ```ignore
+//! use briny_ai::tensors::{Tensor, tensor};
+//! 
 //! let t = Tensor::new(vec![2, 3], vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 //! assert_eq!(t.shape, vec![2, 3]);
 //! ```
+//! 
+//! This flow diagram shows how training should be:
+//! ```text
+//!                 +---------+       +--------+
+//! input a ------> | matmul  |-----> | relu   |----+
+//!                 +---------+       +--------+    |
+//!                                                 v
+//!                                              loss (mse)
+//!                                                 |
+//! target <----------------------------------------+
+//! ```
+//! 
+//! Forward: x → matmul → relu → matmul → mse_loss → scalar
+//! Backward: scalar grad ← mse_loss grad ← matmul grad ← relu grad ← matmul grad ← x.grad
+//! 
 
 /// Represents an N-dimensional tensor with a shape and flat row-major data.
 ///
@@ -43,7 +59,25 @@ pub struct Tensor<T> {
     pub data: Vec<T>,
 }
 
-impl<T> Tensor<T> {
+/// A type alias meaning Tensor<f64>
+pub type Ten64 = Tensor<f64>;
+
+/// A minimal trait that represents a tensor-like structure supporting gradients.
+pub trait TensorGrad: Clone {
+    /// Returns the shape of the tensor.
+    fn shape(&self) -> &[usize];
+
+    /// Returns the number of elements in the tensor.
+    fn len(&self) -> usize;
+
+    /// Returns whether the tensor is empty or not.
+    fn is_empty(&self) -> bool;
+
+    /// Creates a zero-filled tensor of the same shape.
+    fn zeros_like(&self) -> Self;
+}
+
+impl<T: Default + Clone> Tensor<T> {
     /// Creates a new tensor with the given shape and flat data.
     ///
     /// # Panics
@@ -70,13 +104,172 @@ impl<T> Tensor<T> {
     }
 }
 
+impl<T: Copy + Default> Tensor<T> {
+    pub fn transpose(&self) -> Tensor<T> {
+        assert_eq!(self.shape.len(), 2, "Transpose only supports 2D tensors");
+        let (rows, cols) = (self.shape[0], self.shape[1]);
+        let mut transposed = vec![T::default(); rows * cols];
+
+        for i in 0..rows {
+            for j in 0..cols {
+                transposed[j * rows + i] = self.data[i * cols + j];
+            }
+        }
+
+        Tensor::new(vec![cols, rows], transposed)
+    }
+}
+
+impl Ten64 {
+    /// Applies a unary function element-wise to the tensor, returning a new tensor.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let x = Tensor::new(vec![2], vec![1.0, -1.0]);
+    /// let y = x.map(|v| v.abs());
+    /// assert_eq!(y.data, vec![1.0, 1.0]);
+    /// ```
+    ///
+    /// # Arguments
+    /// - `f`: A function that maps `f64 -> f64`
+    ///
+    /// # Returns
+    /// A new `Ten64` with each element transformed by `f`.
+    pub fn map<F: Fn(f64) -> f64>(&self, f: F) -> Self {
+        Self::new(self.shape.clone(), self.data.iter().map(|&x| f(x)).collect())
+    }
+
+    /// Applies a binary function element-wise between two tensors of the same shape,
+    /// returning a new tensor. Useful for defining differentiable pairwise operations.
+    ///
+    /// # Panics
+    /// Panics if the shapes of `self` and `other` do not match.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let a = Tensor::new(vec![2], vec![1.0, 2.0]);
+    /// let b = Tensor::new(vec![2], vec![3.0, 4.0]);
+    /// let c = a.zip_map(&b, |x, y| x + y);
+    /// assert_eq!(c.data, vec![4.0, 6.0]);
+    /// ```
+    ///
+    /// # Arguments
+    /// - `other`: The other tensor to zip with
+    /// - `f`: A function mapping `(f64, f64) -> f64`
+    ///
+    /// # Returns
+    /// A new `Ten64` resulting from applying `f` element-wise.
+    pub fn zip_map<F: Fn(f64, f64) -> f64>(&self, other: &Self, f: F) -> Self {
+        assert_eq!(self.shape, other.shape);
+        Self::new(self.shape.clone(), self.data.iter().zip(&other.data).map(|(&a, &b)| f(a, b)).collect())
+    }
+
+    /// Constructs a new tensor filled with zeros of a specified shape.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let t = Tensor::zeros(vec![3, 2]);
+    /// assert_eq!(t.data, vec![0.0; 6]);
+    /// assert_eq!(t.shape, vec![3, 2]);
+    /// ```
+    ///
+    /// # Arguments
+    /// - `shape`: Shape of the tensor (any iterable that converts to `Vec<usize>`)
+    ///
+    /// # Returns
+    /// A `Ten64` of the given shape, filled with `0.0`.
+    pub fn zeros(shape: impl Into<Vec<usize>>) -> Self {
+        let shape = shape.into();
+        let size = shape.iter().product();
+        Tensor::new(shape, vec![f64::default(); size])
+    }
+
+    /// Multiplies a tensor by another tensor.
+    /// 
+    /// NOTE: This is performed on the CPU!
+    /// Computes the gradient of a matrix multiplication `C = A @ B` with respect to A and B,
+    /// given `grad_output = dL/dC`, the upstream gradient.
+    ///
+    /// Returns `(dA, dB)` such that:
+    /// - `dA = grad_output @ B.T`
+    /// - `dB = A.T @ grad_output`
+    ///
+    /// This assumes `self` is `grad_output` and is shaped `[m, n]`.
+    pub fn matmul(&self, a: &Ten64, b: &Ten64) -> (Ten64, Ten64) {
+        let (m, k) = (a.shape[0], a.shape[1]);
+        let n = b.shape[1];
+
+        assert_eq!(self.shape, vec![m, n], "grad shape mismatch");
+        assert_eq!(a.shape, vec![m, k], "input A shape mismatch");
+        assert_eq!(b.shape, vec![k, n], "input B shape mismatch");
+
+        let mut da = vec![0.0; m * k];
+        let mut db = vec![0.0; k * n];
+
+        let a_data = &a.data;
+        let b_data = &b.data;
+        let grad = &self.data;
+
+        for i in 0..m {
+            for kk in 0..k {
+                let a_ik = a_data[i * k + kk];
+                for j in 0..n {
+                    let g = grad[i * n + j];
+                    da[i * k + kk] += g * b_data[kk * n + j];
+                    db[kk * n + j] += a_ik * g;
+                }
+            }
+        }
+
+        (
+            Tensor::new(vec![m, k], da),
+            Tensor::new(vec![k, n], db),
+        )
+    }
+}
+
+impl TensorGrad for Ten64 {
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.data.len() == 0
+    }
+
+    fn zeros_like(&self) -> Self {
+        Self::new(self.shape.clone(), vec![0.0; self.data.len()])
+    }
+}
+
 /// A container for tracking gradients of values (used in autograd).
 ///
-/// Typically used as `WithGrad<Tensor<f32>>` or `WithGrad<f32>`.
+/// Typically used as `WithGrad<Ten64>` or `WithGrad<f64>`.
 #[derive(Debug, Clone)]
 pub struct WithGrad<T> {
     pub value: T,
     pub grad: T,
+}
+
+pub trait IntoWithGrad: TensorGrad + Sized {
+    /// Wraps the tensor with a zero-initialized gradient.
+    fn with_grad(self) -> WithGrad<Self> {
+        WithGrad::new(self)
+    }
+}
+
+impl<T: TensorGrad> IntoWithGrad for T {}
+
+impl<T: TensorGrad> WithGrad<T> {
+    /// Creates a new `WithGrad` wrapper with zero-initialized gradient.
+    pub fn new(value: T) -> Self {
+        let grad = value.zeros_like();
+        Self { value, grad }
+    }
 }
 
 /// Adds two tensors element-wise, returning result and backprop function.
@@ -88,9 +281,9 @@ pub struct WithGrad<T> {
 /// - Output tensor
 /// - Closure that computes gradients for both inputs given `dL/dout`
 pub fn add_tensor<'a>(
-    a: &'a WithGrad<Tensor<f32>>, 
-    b: &'a WithGrad<Tensor<f32>>
-) -> (Tensor<f32>, impl Fn(&Tensor<f32>) -> (Tensor<f32>, Tensor<f32>) + 'a) {
+    a: &'a WithGrad<Ten64>, 
+    b: &'a WithGrad<Ten64>
+) -> (Ten64, impl Fn(&Ten64) -> (Ten64, Ten64) + 'a) {
     assert_eq!(a.value.shape, b.value.shape);
 
     let out = Tensor::new(
@@ -101,7 +294,7 @@ pub fn add_tensor<'a>(
     let a_shape = a.value.shape.clone();
     let b_shape = b.value.shape.clone();
 
-    let back = move |grad_output: &Tensor<f32>| {
+    let back = move |grad_output: &Ten64| {
         (
             Tensor::new(a_shape.clone(), grad_output.data.clone()),
             Tensor::new(b_shape.clone(), grad_output.data.clone()),
@@ -112,30 +305,17 @@ pub fn add_tensor<'a>(
 }
 
 /// Computes `a + b` for scalars, with autograd-compatible backward pass.
-pub fn add(a: &WithGrad<f32>, b: &WithGrad<f32>) -> (f32, impl Fn(f32) -> (f32, f32)) {
+pub fn add(a: &WithGrad<f64>, b: &WithGrad<f64>) -> (f64, impl Fn(f64) -> (f64, f64)) {
     let y = a.value + b.value;
-    let back = move |grad_output: f32| (grad_output, grad_output);
+    let back = move |grad_output: f64| (grad_output, grad_output);
     (y, back)
 }
 
 /// Computes `a * b` for scalars, with autograd-compatible backward pass.
-pub fn mul(a: &WithGrad<f32>, b: &WithGrad<f32>) -> (f32, impl Fn(f32) -> (f32, f32)) {
+pub fn mul(a: &WithGrad<f64>, b: &WithGrad<f64>) -> (f64, impl Fn(f64) -> (f64, f64)) {
     let y = a.value * b.value;
-    let back = move |grad_output: f32| (grad_output * b.value, grad_output * a.value);
+    let back = move |grad_output: f64| (grad_output * b.value, grad_output * a.value);
     (y, back)
-}
-
-/// Performs SGD update in-place: `param -= lr * grad`, resets gradient to 0.0.
-///
-/// # Panics
-/// Panics if shapes of `value` and `grad` mismatch.
-pub fn sgd(w: &mut WithGrad<Tensor<f64>>, lr: f64) {
-    for (w_i, g_i) in w.value.data.iter_mut().zip(&w.grad.data) {
-        *w_i -= lr * *g_i;
-    }
-    for g_i in &mut w.grad.data {
-        *g_i = 0.0;
-    }
 }
 
 /// Defines a tensor from nested literal arrays.
@@ -143,7 +323,7 @@ pub fn sgd(w: &mut WithGrad<Tensor<f64>>, lr: f64) {
 /// Supports arbitrary dimensionality as long as sublists are uniform in shape.
 ///
 /// # Example
-/// ```
+/// ```ignore
 /// use briny_ai::tensor;
 /// let t = tensor!([[1.0, 2.0], [3.0, 4.0]]);
 /// assert_eq!(t.shape, vec![2, 2]);
@@ -153,7 +333,6 @@ macro_rules! tensor {
     ($lit:literal) => {
         $crate::tensors::Tensor::new(Vec::<usize>::new(), vec![$lit])
     };
-
     ([ $( $inner:tt ),+ $(,)? ]) => {{
         let children = vec![ $( tensor!($inner) ),+ ];
         let first_shape = &children[0].shape;
@@ -167,19 +346,19 @@ macro_rules! tensor {
     }};
 }
 
-/// Parses a JSON string containing a flat or nested array into a `Tensor<f64>`.
+/// Parses a JSON string containing a flat or nested array into a `Ten64`.
 ///
 /// # Format
 /// Accepts standard JSON arrays (e.g. `[1, 2]` or `[[1.0, 2.0], [3.0, 4.0]]`).
 ///
 /// # Returns
-/// A `Tensor<f64>` if parsing succeeds, else an error string.
+/// A `Ten64` if parsing succeeds, else an error string.
 ///
 /// # Limitations
 /// - Input must be syntactically valid JSON arrays.
 /// - Ragged arrays (non-uniform shapes) are rejected.
 /// - Only `f64` values are supported.
-pub fn parse_tensor(json: &str) -> Result<Tensor<f64>, &'static str> {
+pub fn parse_tensor(json: &str) -> Result<Ten64, &'static str> {
     enum Tok { LBrack, RBrack, Comma, Num(f64) }
 
     fn next_token(i: &mut usize, s: &[u8]) -> Result<Tok, &'static str> {

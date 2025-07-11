@@ -75,11 +75,17 @@ use std::error::Error;
 pub fn save_model(path: &str, tensors: &[Tensor<f64>]) -> Result<(), Box<dyn Error>> {
     let mut file = BufWriter::new(File::create(path)?);
 
-    // Write magic header and tensor count
+    // write magic header and tensor count
     file.write_all(b"bpat")?;
     file.write_all(&[tensors.len() as u8])?;
 
     for tensor in tensors {
+        assert_eq!(
+            tensor.data.len(),
+            tensor.shape.iter().product(),
+            "tensor shape/data mismatch"
+        );
+
         let dims = tensor.shape.len() as u64;
         file.write_all(&dims.to_le_bytes())?;
 
@@ -116,16 +122,16 @@ pub fn load_model(path: &str) -> Result<Vec<Tensor<f64>>, Box<dyn Error>> {
     let mut file = BufReader::new(File::open(path)?);
     let mut buf8 = [0u8; 8];
 
-    // Check magic header
+    // check magic header
     let mut magic = [0u8; 4];
     file.read_exact(&mut magic)?;
     if &magic != b"bpat" {
         return Err("invalid magic header".into());
     }
 
-    // Read tensor count
+    // read tensor count
     let mut count = [0u8; 1];
-    file.read_exact(&mut count)?;
+    file.read_exact(&mut count).map_err(|_| "file too short or corrupt")?;
     let count = count[0] as usize;
 
     let mut tensors = Vec::with_capacity(count);

@@ -1,6 +1,6 @@
 [package]
 name = "briny_ai"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Minimal autodiff + tensor engine with serialization"
 license = "MIT"
@@ -9,3 +9,25 @@ keywords = ["autograd", "tensor", "machine-learning"]
 categories = ["science", "mathematics", "data-structures"]
 repository = "https://github.com/bobbothe2nd/briny_ai"
 readme = "README.md"
+
+[dependencies]
+bytemuck = { version = "1.14", features = ["derive"] }
+lazy_static = "1.5.0"
+pollster = { version = "0.4.0", optional = true }
+rayon = { version = "=1.8.0", default-features = false }
+wgpu = { version = "26.0.0", optional = true }
+
+[features]
+cpu = [] 
+default = ["cpu"]
+simd = []
+wgpu = ["dep:wgpu", "dep:pollster"]
+cuda = ["dep:wgpu", "dep:pollster"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["blocking"] }
+flate2 = "1"
+rand = "0.8"

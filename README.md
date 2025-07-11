@@ -13,12 +13,10 @@ This library provides low-level primitives for defining and training differentia
 
 ## Features
 
-- Pure Rust, no dependencies
 - Compact and fast `.bpat` binary model format
 - Forward + backward computation via closures
 - Extensible tensor structure with runtime shape checking
-
----
+- CPU & GPU acceleration
 
 ## Usage
 
@@ -26,7 +24,7 @@ To use `briny_ai`, add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-briny_ai = "0.1.0"
+briny_ai = "0.2.0"
 ```
 
 ## Example
@@ -69,17 +67,22 @@ assert_eq!(tensors[0], tensor);
 
 - Only f64 tensors are supported
 - No broadcasting or shape inference yet
-- No support for convolution or GPU acceleration
+- No support for convolution or Cuda acceleration
 - Autograd is manual via backward closures
 
 ## Roadmap
 
 - Broadcasting + batched ops
-- Drop-in replacements for BLAS (SIMD)
-- CUDA / WebGPU backend support
+- CUDA backend support
 - Graph-based autograd (reuse, optimization)
 - Custom layers & high-level model struct
 
 ## Contributing
 
-PRs welcome. This project is early-stage but cleanly structured and easy to extend. Open issues or ideas any time! It's MIT Licensed, too.
+PRs welcome. This project is early-stage but cleanly structured and easy to extend. Open issues or ideas any time!
+
+Got an Nvidia GPU or know CUDA? Your help is golden!
+
+### License
+
+Licensed under the MIT License.

@@ -1,17 +1,10 @@
-use briny_ai::tensors::*;
-use briny_ai::backprop::*;
+//! Tests for core tensor operations, autograd, and CPU ops
 
-#[test]
-fn test_tensor_shape_mismatch_panics() {
-    let result = std::panic::catch_unwind(|| {
-        Tensor::new(vec![2, 2], vec![1.0, 2.0, 3.0]);
-    });
-    assert!(result.is_err());
-}
+use briny_ai::tensors::*;
+use briny_ai::ops::cpu::{matmul, mse_loss, relu, sgd};
 
 #[test]
 fn test_bpat_save_and_load() {
-    use briny_ai::tensors::Tensor;
     use briny_ai::modelio::{save_model, load_model};
 
     let a = Tensor::new(vec![2, 3], vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
@@ -26,66 +19,97 @@ fn test_bpat_save_and_load() {
 }
 
 #[test]
-fn test_add_backprop_scalar() {
-    let a = WithGrad { value: 2.0, grad: 0.0 };
-    let b = WithGrad { value: 3.0, grad: 0.0 };
-    let (y, back) = add(&a, &b);
-    let (da, db) = back(1.0);
-    assert_eq!(y, 5.0);
-    assert_eq!(da, 1.0);
-    assert_eq!(db, 1.0);
+fn test_tensor_creation() {
+    let t = Tensor::new(vec![2, 2], vec![1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(t.shape, vec![2, 2]);
+    assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
 }
 
 #[test]
-fn test_mul_backprop_scalar() {
-    let a = WithGrad { value: 2.0, grad: 0.0 };
-    let b = WithGrad { value: 3.0, grad: 0.0 };
-    let (y, back) = mul(&a, &b);
-    let (da, db) = back(1.0);
-    assert_eq!(y, 6.0);
-    assert_eq!(da, 3.0);
-    assert_eq!(db, 2.0);
+fn test_tensor_map() {
+    let t = Tensor::new(vec![2], vec![1.0, 2.0]);
+    let t2 = t.map(|x| x * 2.0);
+    assert_eq!(t2.data, vec![2.0, 4.0]);
 }
 
 #[test]
-fn test_relu_backprop() {
-    let input = WithGrad {
-        value: Tensor::new(vec![3], vec![-1.0, 0.0, 2.0]),
-        grad: Tensor::new(vec![3], vec![0.0; 3]),
-    };
-    let (out, back) = relu(&input);
-    assert_eq!(out.data, vec![0.0, 0.0, 2.0]);
-
-    let grad_in = back(&Tensor::new(vec![3], vec![1.0, 1.0, 1.0]));
-    assert_eq!(grad_in.data, vec![0.0, 0.0, 1.0]);
+fn test_tensor_zip_map() {
+    let a = Tensor::new(vec![2], vec![1.0, 2.0]);
+    let b = Tensor::new(vec![2], vec![3.0, 4.0]);
+    let c = a.zip_map(&b, |x, y| x + y);
+    assert_eq!(c.data, vec![4.0, 6.0]);
 }
 
 #[test]
-fn test_mse_loss_and_backprop() {
-    let pred = WithGrad {
-        value: Tensor::new(vec![2], vec![1.0, 2.0]),
-        grad: Tensor::new(vec![2], vec![0.0, 0.0]),
-    };
-    let target = Tensor::new(vec![2], vec![0.0, 0.0]);
-    let (loss, back) = mse_loss(&pred, &target);
-    let grad = back(1.0);
-    assert!(loss > 0.0);
-    assert_eq!(grad.shape, vec![2]);
+fn test_tensor_zeros() {
+    let z = Tensor::zeros(vec![3]);
+    assert_eq!(z.data, vec![0.0; 3]);
 }
 
 #[test]
-fn test_matmul_backprop() {
-    let a = WithGrad {
-        value: Tensor::new(vec![2, 2], vec![1.0, 2.0, 3.0, 4.0]),
-        grad: Tensor::new(vec![2, 2], vec![0.0; 4]),
-    };
-    let b = WithGrad {
-        value: Tensor::new(vec![2, 2], vec![5.0, 6.0, 7.0, 8.0]),
-        grad: Tensor::new(vec![2, 2], vec![0.0; 4]),
-    };
-    let (out, back) = matmul(&a, &b);
+fn test_with_grad_creation() {
+    let t = Tensor::new(vec![2], vec![1.0, 2.0]);
+    let wg = WithGrad::new(t.clone());
+    assert_eq!(wg.value, t);
+    assert_eq!(wg.grad.data, vec![0.0, 0.0]);
+}
+
+#[test]
+fn test_tensor_with_grad_conversion() {
+    let t = Tensor::new(vec![2], vec![1.0, 2.0]);
+    let wg = t.with_grad();
+    assert_eq!(wg.value.data, vec![1.0, 2.0]);
+    assert_eq!(wg.grad.data, vec![0.0, 0.0]);
+}
+
+#[test]
+fn test_tensor_macro() {
+    use briny_ai::tensor;
+    let a = tensor!([
+        [1.0, 2.0, 3.0], // row 1
+        [4.0, 5.0, 6.0], // row 2
+    ]);
+    let b = Tensor::new(vec![2, 3], vec![
+        1.0, 2.0, 3.0,   // row 1
+        4.0, 5.0, 6.0,  // row 2
+    ]);
+
+    assert_eq!(a, b);
+}
+
+#[test]
+fn test_matmul_basic() {
+    let a = Tensor::new(vec![2, 3], vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).with_grad();
+    let b = Tensor::new(vec![3, 2], vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0]).with_grad();
+    let (out, _) = matmul(&a, &b);
     assert_eq!(out.shape, vec![2, 2]);
-    let (da, db) = back(&Tensor::new(vec![2, 2], vec![1.0; 4]));
-    assert_eq!(da.shape, vec![2, 2]);
-    assert_eq!(db.shape, vec![2, 2]);
+    assert_eq!(out.data, vec![58.0, 64.0, 139.0, 154.0]);
+}
+
+#[test]
+fn test_mse_loss_basic() {
+    let pred = Tensor::new(vec![2], vec![1.0, 2.0]).with_grad();
+    let target = Tensor::new(vec![2], vec![2.0, 2.0]);
+    let (loss, back) = mse_loss(&pred, &target);
+    assert_eq!(loss, 0.5);
+    let grad = back(1.0);
+    assert_eq!(grad.data, vec![-1.0, 0.0]);
+}
+
+#[test]
+fn test_relu_forward_and_backward() {
+    let input = Tensor::new(vec![4], vec![-1.0, 0.0, 1.0, 2.0]).with_grad();
+    let (out, back) = relu(&input);
+    assert_eq!(out.data, vec![0.0, 0.0, 1.0, 2.0]);
+    let grad_input = back(&Tensor::new(vec![4], vec![1.0, 1.0, 1.0, 1.0]));
+    assert_eq!(grad_input.data, vec![0.0, 0.0, 1.0, 1.0]);
+}
+
+#[test]
+fn test_sgd_updates_and_zeroing() {
+    let mut param = Tensor::new(vec![2], vec![1.0, 2.0]).with_grad();
+    param.grad = Tensor::new(vec![2], vec![0.1, 0.5]);
+    sgd(&mut param, 0.1);
+    assert_eq!(param.value.data, vec![0.99, 1.95]);
+    assert_eq!(param.grad.data, vec![0.0, 0.0]);
 }

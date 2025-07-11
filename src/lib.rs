@@ -1,39 +1,52 @@
-//! briny_ai: A lightweight, efficient AI/ML framework in Rust.
+//! # briny_ai
 //!
-//! Designed for high-performance numerical computation, tensor manipulation,
-//! and deep learning with a focus on minimal dependencies and maximal clarity.
+//! This crate provides a fast, minimal, and modular deep learning backend
+//! built in Rust. It features basic tensor operations, automatic differentiation,
+//! and support for CPU acceleration via Rayon and AVX2 SIMD. GPU support via WGPU
+//! is optional and designed for portability across Intel, AMD, and NVIDIA hardware.
 //!
-//! # Features
+//! ## Features
 //!
-//! - Multi-dimensional tensor management with gradient support.
-//! - Core deep learning operations with manual backpropagation closures.
-//! - Model serialization and deserialization with compression and optional encryption.
+//! - **Tensors**: N-dimensional arrays with shape tracking and gradient support
+//! - **Autograd**: Functional-style forward and backward passes
+//! - **Operators**: Efficient implementations of matrix multiplication, ReLU,
+//!   mean squared error, and stochastic gradient descent
+//! - **Parallelism**: Leveraging `rayon` for CPU-side data parallelism
+//! - **SIMD**: Optional AVX2 SIMD acceleration for key operators
+//! - **GPU Acceleration**: Optional `wgpu`-powered compute shaders for matrix ops
 //!
-//! # Goals
+//! ## Features
 //!
-//! - Enable easy experimentation with neural networks and ML algorithms in Rust.
-//! - Prioritize correctness, explicitness, and extensibility over black-box abstraction.
-//! - Provide a solid base for embedded and resource-constrained ML workloads.
+//! Enable with Cargo features:
 //!
-//! # Modules
+//! - `simd` — Enables AVX2 SIMD acceleration on supported x86_64 targets
+//! - `gpu` — Enables GPU compute shaders via WGPU
 //!
-//! - [`tensors`] — Core tensor data structures and operations.
-//! - [`backprop`] — Differentiable operations and autograd utilities.
-//! - [`modelio`] — Robust saving/loading of model weights with integrity checks and optional security.
+//! ## Safety Notes
 //!
-//! # Future Directions
+//! - SIMD operations are gated behind feature flags and use `unsafe` internally.
+//! - GPU support assumes buffers are correctly sized and aligned — validated at runtime.
 //!
-//! - Extend autograd to support dynamic computation graphs and more complex architectures.
-//! - Optimize tensor math with SIMD, BLAS, or GPU acceleration backends.
-//! - Add higher-level model abstractions (layers, optimizers, datasets).
+//! ## Roadmap
 //!
-//! # Example
-//!
-//! ```rust
-//! use briny_ai::tensors::Tensor;
-//! // Create a simple tensor and manipulate it...
-//! ```
-//!
+//! - [ ] CNN primitives (conv2d, pooling)
+//! - [ ] GPU gradient computation
+//! - [ ] Model serialization
+//! - [ ] Integration with `ndarray` or `nalgebra`
+
+#![allow(unexpected_cfgs)] // don't warn me of unused platforms
+#![allow(dead_code)] // don't warn me of unused enums
+
+pub mod prelude {
+    pub use crate::tensors::{Tensor, WithGrad};
+    pub use crate::backprop::*;
+    pub use crate::modelio::{save_model, load_model};
+}
+
 pub mod tensors;
 pub mod backprop;
 pub mod modelio;
+pub mod ops;
+pub mod backend;
+
+pub use tensors::{Tensor, WithGrad};

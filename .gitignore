@@ -1,0 +1,6 @@
+/Cargo.lock
+/target
+/mnist_data
+/mnist_model.bpat
+/test_model.bpat
+/xor_model.bpat
