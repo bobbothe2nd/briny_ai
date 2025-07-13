@@ -16,11 +16,16 @@
 //! Dispatching logic is handled internally based on compile-time features or runtime flags.
 //!
 //! Example:
-//! ```ignore
+//! ```rust
 //! use briny_ai::backend::Backend;
-//!
+//! use briny_ai::backprop::matmul;
+//! use briny_ai::WithGrad;
+//! use briny_ai::tensor;
+//! 
+//! let a = WithGrad::new(tensor!([[5.0, 4.0], [3.0, 2.0]]));
+//! let b = WithGrad::new(tensor!([[1.0, 2.0], [3.0, 4.0]]));
 //! let backend = Backend::default(); // defaults to CPU
-//! let result = a.matmul(&b); // runs on CPU
+//! let result = matmul(&a, &b); // runs on CPU
 //! ```
 //!
 //! ## Extending the Backend
@@ -51,7 +56,7 @@
 
 pub mod dispatch;
 pub mod cpu;
-#[cfg(all(feature = "cuda", feature = "wgpu"))]
+#[cfg(feature = "cuda")]
 pub mod cuda;
-#[cfg(feature = "wgpu")]
+#[cfg(any(feature = "wgpu", feature = "cuda"))]
 pub mod wgpu;

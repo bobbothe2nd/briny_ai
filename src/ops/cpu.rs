@@ -35,7 +35,7 @@
 #[cfg(feature = "simd")]
 use std::arch::x86_64::*;
 use rayon::prelude::*;
-use crate::tensors::{WithGrad, Tensor, Ten64};
+use crate::{ops::dispatch::{FnF64Ten64, FnTen64To, FnToDoubleTen64}, tensors::{Ten64, Tensor, WithGrad}};
 
 /// Performs a matrix multiplication `C = A × B` on two 2D tensors (`A: m×k`, `B: k×n`),
 /// returning the result tensor and a closure for backpropagation.
@@ -55,14 +55,20 @@ use crate::tensors::{WithGrad, Tensor, Ten64};
 /// - If the inner dimensions of `A` and `B` do not match.
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use briny_ai::backprop::matmul;
+/// use briny_ai::{tensor, tensors::WithGrad};
+/// 
+/// let a = WithGrad::new(briny_ai::tensor!([[5.0, 1.0], [6.0, 3.0]]));
+/// let b = WithGrad::new(briny_ai::tensor!([[1.0, 2.0], [5.0, 1.9]]));
+/// let grad_output = tensor!([[1.0, 2.0], [3.0, 2.0]]);
 /// let (c, back) = matmul(&a, &b);
 /// let (grad_a, grad_b) = back(&grad_output);
 /// ```
 pub fn matmul(
     a: &WithGrad<Ten64>,
     b: &WithGrad<Ten64>,
-) -> (Ten64, Box<dyn Fn(&Ten64) -> (Ten64, Ten64)>) {
+) -> (Ten64, Box<FnToDoubleTen64>) {
     let m = a.value.shape[0];
     let k = a.value.shape[1];
     let n = b.value.shape[1];
@@ -148,14 +154,20 @@ pub fn matmul(
 /// - Suitable for batch or scalar regression losses
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use briny_ai::backprop::mse_loss;
+/// use briny_ai::tensors::WithGrad;
+/// use briny_ai::tensor;
+/// 
+/// let y_pred = WithGrad::new(tensor!([1.0, 2.0, 3.0]));
+/// let y_true = tensor!([1.0, 3.0, 2.0]);
 /// let (loss, back) = mse_loss(&y_pred, &y_true);
 /// let grad_tensor = back(1.0); // ∂L/∂y_pred
 /// ```
 pub fn mse_loss<'a>(
     prediction: &'a WithGrad<Ten64>,
     target: &'a Ten64,
-) -> (f64, Box<dyn Fn(f64) -> Ten64 + 'a>) {
+) -> (f64, Box<FnF64Ten64<'a>>) {
     let n = prediction.value.data.len() as f64;
 
     // parallel forward pass
@@ -202,13 +214,18 @@ pub fn mse_loss<'a>(
 /// - Backward function uses input value to compute mask
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use briny_ai::backprop::relu;
+/// use briny_ai::{tensor, tensors::WithGrad};
+/// 
+/// let input = WithGrad::new(tensor!([[10.0, 30.0], [20.0, 50.0]]));
+/// let grad_output = tensor!([5.0, 2.0, 3.0, 4.0]);
 /// let (out, back) = relu(&input);
 /// let grad_input = back(&grad_output);
 /// ```
 pub fn relu(
     input: &WithGrad<Ten64>,
-) -> (Ten64, Box<dyn Fn(&Ten64) -> Ten64>) {
+) -> (Ten64, Box<FnTen64To>) {
     let shape = input.value.shape.clone();
     let len = input.value.data.len();
     let mut data = vec![0.0f64; len];
@@ -302,7 +319,12 @@ pub fn relu(
 /// - `lr`: Learning rate (step size)
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use briny_ai::backprop::sgd;
+/// use briny_ai::tensor;
+/// use briny_ai::tensors::WithGrad;
+/// 
+/// let mut weights = WithGrad::new(tensor!([3.0, 5.0, 4.0]));
 /// sgd(&mut weights, 0.01);
 /// ```
 pub fn sgd(w: &mut WithGrad<Ten64>, lr: f64) {

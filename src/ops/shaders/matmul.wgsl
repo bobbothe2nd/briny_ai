@@ -2,6 +2,7 @@ struct MatDims {
     m: u32,
     k: u32,
     n: u32,
+    flags: u32, // bit 0 = transpose A, bit 1 = transpose B
 };
 
 @group(0) @binding(0) var<uniform> dims: MatDims;
@@ -11,6 +12,12 @@ struct MatDims {
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let ta = (dims.flags & 1u) != 0u;
+    let tb = (dims.flags & 2u) != 0u;
+
+    // A access: A[ta ? i * m + row : row * k + i]
+    // B access: B[tb ? col * k + i : i * n + col]
+
     let row = gid.y;
     let col = gid.x;
 

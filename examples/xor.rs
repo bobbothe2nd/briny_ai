@@ -90,7 +90,7 @@ fn main() {
         sgd(&mut w1, lr);
         sgd(&mut w2, lr);
 
-        if epoch % 100 == 0 {
+        if ( epoch + 1 ) % 100 == 0 {
             println!("Epoch {epoch}: Loss = {:.6}", loss_accum / 4.0);
         }
     }

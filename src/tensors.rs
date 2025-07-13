@@ -26,8 +26,8 @@
 //!
 //! ## Example
 //!
-//! ```ignore
-//! use briny_ai::tensors::{Tensor, tensor};
+//! ```rust
+//! use briny_ai::{tensor, tensors::{Tensor}};
 //! 
 //! let t = Tensor::new(vec![2, 3], vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 //! assert_eq!(t.shape, vec![2, 3]);
@@ -46,7 +46,8 @@
 //! 
 //! Forward: x → matmul → relu → matmul → mse_loss → scalar
 //! Backward: scalar grad ← mse_loss grad ← matmul grad ← relu grad ← matmul grad ← x.grad
-//! 
+
+use briny::trust::UntrustedData;
 
 /// Represents an N-dimensional tensor with a shape and flat row-major data.
 ///
@@ -124,7 +125,9 @@ impl Ten64 {
     /// Applies a unary function element-wise to the tensor, returning a new tensor.
     ///
     /// # Example
-    /// ```ignore
+    /// ```rust
+    /// use briny_ai::tensors::Tensor;
+    /// 
     /// let x = Tensor::new(vec![2], vec![1.0, -1.0]);
     /// let y = x.map(|v| v.abs());
     /// assert_eq!(y.data, vec![1.0, 1.0]);
@@ -146,7 +149,9 @@ impl Ten64 {
     /// Panics if the shapes of `self` and `other` do not match.
     ///
     /// # Example
-    /// ```ignore
+    /// ```rust
+    /// use briny_ai::tensors::Tensor;
+    /// 
     /// let a = Tensor::new(vec![2], vec![1.0, 2.0]);
     /// let b = Tensor::new(vec![2], vec![3.0, 4.0]);
     /// let c = a.zip_map(&b, |x, y| x + y);
@@ -167,7 +172,9 @@ impl Ten64 {
     /// Constructs a new tensor filled with zeros of a specified shape.
     ///
     /// # Example
-    /// ```ignore
+    /// ```rust
+    /// use briny_ai::tensors::Tensor;
+    /// 
     /// let t = Tensor::zeros(vec![3, 2]);
     /// assert_eq!(t.data, vec![0.0; 6]);
     /// assert_eq!(t.shape, vec![3, 2]);
@@ -255,6 +262,7 @@ pub struct WithGrad<T> {
     pub grad: T,
 }
 
+/// A trait mainly for converting `Tensor`s to `WithGrad`.
 pub trait IntoWithGrad: TensorGrad + Sized {
     /// Wraps the tensor with a zero-initialized gradient.
     fn with_grad(self) -> WithGrad<Self> {
@@ -323,8 +331,9 @@ pub fn mul(a: &WithGrad<f64>, b: &WithGrad<f64>) -> (f64, impl Fn(f64) -> (f64, 
 /// Supports arbitrary dimensionality as long as sublists are uniform in shape.
 ///
 /// # Example
-/// ```ignore
+/// ```rust
 /// use briny_ai::tensor;
+///
 /// let t = tensor!([[1.0, 2.0], [3.0, 4.0]]);
 /// assert_eq!(t.shape, vec![2, 2]);
 /// ```
@@ -358,66 +367,165 @@ macro_rules! tensor {
 /// - Input must be syntactically valid JSON arrays.
 /// - Ragged arrays (non-uniform shapes) are rejected.
 /// - Only `f64` values are supported.
-pub fn parse_tensor(json: &str) -> Result<Ten64, &'static str> {
+pub fn parse_tensor(json: &str) -> Result<Tensor<f64>, &'static str> {
+    let untrusted = UntrustedData::new(json);
+    validate_tensor(untrusted)
+}
+
+fn validate_tensor(untrusted: UntrustedData<&str>) -> Result<Tensor<f64>, &'static str> {
+    let json = untrusted.value();
+    let bytes = json.as_bytes();
+    let mut idx = 0;
+
     enum Tok { LBrack, RBrack, Comma, Num(f64) }
 
-    fn next_token(i: &mut usize, s: &[u8]) -> Result<Tok, &'static str> {
+    fn next_token(i: &mut usize, s: &[u8]) -> Result<Option<Tok>, &'static str> {
         while *i < s.len() && s[*i].is_ascii_whitespace() { *i += 1; }
-        if *i >= s.len() { return Err("unexpected EOF"); }
+        if *i >= s.len() { return Ok(None); }
         let c = s[*i];
         *i += 1;
-        Ok(match c {
+        Ok(Some(match c {
             b'[' => Tok::LBrack,
             b']' => Tok::RBrack,
             b',' => Tok::Comma,
             b'-' | b'0'..=b'9' => {
                 let start = *i - 1;
-                while *i < s.len() && (s[*i].is_ascii_digit() || s[*i] == b'.' || s[*i] == b'e' || s[*i] == b'E' || s[*i] == b'+' || s[*i] == b'-') {
+                while *i < s.len() &&
+                    (s[*i].is_ascii_digit() || matches!(s[*i], b'.' | b'e' | b'E' | b'+' | b'-')) {
                     *i += 1;
                 }
-                let num = std::str::from_utf8(&s[start..*i]).unwrap().parse::<f64>()
-                           .map_err(|_| "bad number")?;
+                let num_str = std::str::from_utf8(&s[start..*i]).map_err(|_| "invalid utf8")?;
+                let num = num_str.parse::<f64>().map_err(|_| "bad number")?;
                 Tok::Num(num)
             }
-            _ => return Err("invalid char"),
-        })
+            _ => return Err("invalid character"),
+        }))
     }
 
-    let mut idx = 0;
-    let bytes = json.as_bytes();
-    let mut dims: Vec<usize> = Vec::new();
-    let mut data: Vec<f64>  = Vec::new();
-    let mut level = 0;
-    let mut expect_val = true;
+    fn parse_value(
+        idx: &mut usize,
+        s: &[u8],
+        out: &mut Vec<f64>,
+    ) -> Result<Vec<usize>, &'static str> {
+        if let Some(tok) = next_token(idx, s)? {
+            match tok {
+                Tok::Num(n) => {
+                    out.push(n);
+                    Ok(vec![]) // scalar
+                }
+                Tok::LBrack => {
+                    let mut shapes = Vec::new();
+                    let mut count = 0;
+                    let mut first = true;
+                    loop {
+                        // peek RBrack
+                        let save = *idx;
+                        match next_token(idx, s)? {
+                            Some(Tok::RBrack) => break,
+                            Some(_) => *idx = save,
+                            None => return Err("unexpected EOF"),
+                        }
 
-    loop {
-        let t = next_token(&mut idx, bytes)?;
-        match t {
-            Tok::LBrack => {
-                if dims.len() == level { dims.push(0); }
-                level += 1;
-                expect_val = true;
+                        if !first {
+                            match next_token(idx, s)? {
+                                Some(Tok::Comma) => {}
+                                _ => return Err("missing comma"),
+                            }
+                        }
+
+                        let child_shape = parse_value(idx, s, out)?;
+                        if let Some(prev_shape) = shapes.first() {
+                            if child_shape != *prev_shape {
+                                return Err("ragged tensor");
+                            }
+                        }
+                        shapes.push(child_shape);
+                        count += 1;
+                        first = false;
+                    }
+
+                    Ok([vec![count], shapes.first().unwrap_or(&vec![]).clone()].concat())
+                }
+                _ => Err("expected number or array"),
             }
-            Tok::RBrack => {
-                if expect_val && dims[level] != 0 { return Err("trailing comma"); }
-                level -= 1;
-                if level == 0 { break; }
-                if dims[level] == 0 { dims[level] = dims[level+1]; }
-                if dims[level] != dims[level+1] { return Err("ragged tensor"); }
-                dims[level+1] = 0;
-                expect_val = false;
-            }
-            Tok::Comma => {
-                if expect_val { return Err("comma where value expected"); }
-                expect_val = true;
-            }
-            Tok::Num(n) => {
-                if !expect_val { return Err("two values without comma"); }
-                data.push(n);
-                dims[level] += 1;
-                expect_val = false;
-            }
+        } else {
+            Err("unexpected EOF")
         }
     }
-    Ok(Tensor::new(dims[..level].to_vec(), data))
+
+    let mut flat_data = Vec::new();
+    let shape = parse_value(&mut idx, bytes, &mut flat_data)?;
+
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+
+    if idx != bytes.len() {
+        return Err("trailing characters after tensor");
+    }
+
+    let expected_len: usize = shape.iter().product();
+    if expected_len != flat_data.len() {
+        return Err("data shape mismatch");
+    }
+
+    Ok(Tensor { shape, data: flat_data })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_tensor_valid() {
+        let input = "[[1.0, 2.0], [3.0, 4.0]]";
+        let tensor = parse_tensor(input).expect("parse failed");
+
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_parse_tensor_ragged() {
+        let input = "[[1.0], [2.0, 3.0]]";
+        let err = parse_tensor(input).unwrap_err();
+        assert_eq!(err, "ragged tensor");
+    }
+
+    #[test]
+    fn test_parse_tensor_trailing_comma() {
+        let input = "[1.0, 2.0,]";
+        let err = parse_tensor(input).unwrap_err();
+        assert_eq!(err, "expected number or array");
+    }
+
+    #[test]
+    fn test_parse_tensor_missing_comma() {
+        let input = "[1.0 2.0]";
+        let err = parse_tensor(input).unwrap_err();
+        assert_eq!(err, "missing comma");
+    }
+
+    #[test]
+    fn test_parse_tensor_data_shape_mismatch() {
+        let input = "[[1.0, 2.0], [3.0, 4.0, 5.0]]";
+        let err = parse_tensor(input).unwrap_err();
+        assert_eq!(err, "ragged tensor");
+    }
+
+    #[test]
+    fn test_parse_tensor_single_value() {
+        let input = "[[42.0]]";
+        let tensor = parse_tensor(input).expect("parse failed");
+        assert_eq!(tensor.shape, vec![1, 1]);
+        assert_eq!(tensor.data, vec![42.0]);
+    }
+
+    #[test]
+    fn test_parse_tensor_whitespace_okay() {
+        let input = "  [ \n[1.0 , 2.0] ,\n[3.0,4.0] ] ";
+        let tensor = parse_tensor(input).expect("parse failed");
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, 4.0]);
+    }
 }

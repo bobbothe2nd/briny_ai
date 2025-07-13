@@ -35,8 +35,12 @@ use crate::tensors::{Ten64, WithGrad};
 /// - `back`: Closure mapping `dL/d(out)` to `dL/d(input)` by passing gradients only where input > 0.
 ///
 /// # Example
-/// ```ignore
-/// let (out, back) = relu(&input);
+/// ```rust
+/// use briny_ai::tensor;
+/// 
+/// let input = briny_ai::tensors::WithGrad::new(tensor!([[3.0, 3.0], [9.0, 0.0]]));
+/// let grad_out = tensor!([[2.0, 4.0], [6.0, 3.0]]);
+/// let (out, back) = briny_ai::backprop::relu(&input);
 /// let grad_in = back(&grad_out);
 /// ```
 /// 
@@ -59,6 +63,8 @@ pub fn relu(
 ///
 /// # Performance
 /// Uses AVX2 if compiled with `simd` feature. Uses Rayon for outer parallelism.
+/// 
+/// When compiled with `wgpu` feature, it accelerates matrix multiplication to perform both forward and backward pass on the GPU.
 pub fn matmul(
     a: &WithGrad<Ten64>,
     b: &WithGrad<Ten64>,

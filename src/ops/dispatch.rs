@@ -14,10 +14,13 @@
 //! - **Fallback logic**: Safe and deterministic fallback to CPU
 //!
 //! # Example
-//! ```ignore
-//! use crate::tensors::WithGrad;
-//! use crate::backprop::matmul;
-//!
+//! ```rust
+//! use briny_ai::{tensor, tensors::{Tensor, WithGrad}};
+//! use briny_ai::backprop::matmul;
+//! 
+//! let a = WithGrad::new(tensor!([[30.0, 50.0], [20.0, 40.0]]));
+//! let b = WithGrad::new(tensor!([[20.0, 40.0], [30.0, 50.0]]));
+//! let grad_out = tensor!([[20.4, 40.5], [30.6, 50.2]]);
 //! let (out, back) = matmul(&a, &b); // uses GPU if available
 //! let (grad_a, grad_b) = back(&grad_out);
 //! ```
@@ -25,6 +28,10 @@
 
 use crate::backend::{get_backend, Backend};
 use crate::tensors::{WithGrad, Ten64};
+
+pub type FnToDoubleTen64 = dyn Fn(&Ten64) -> (Ten64, Ten64);
+pub type FnF64Ten64<'a> = dyn Fn(f64) -> Ten64 + 'a;
+pub type FnTen64To<'a> = dyn Fn(&Ten64) -> Ten64 + 'a;
 
 /// Dispatches matrix multiplication to the selected backend (CPU, WGPU, or CUDA).
 ///
@@ -37,7 +44,7 @@ use crate::tensors::{WithGrad, Ten64};
 pub fn matmul(
     a: &WithGrad<Ten64>,
     b: &WithGrad<Ten64>,
-) -> (Ten64, Box<dyn Fn(&Ten64) -> (Ten64, Ten64)>) {
+) -> (Ten64, Box<FnToDoubleTen64>) {
     match get_backend() {
         Backend::Cuda => {
             #[cfg(feature = "cuda")]
@@ -72,7 +79,7 @@ pub fn matmul(
 pub fn mse_loss<'a>(
     prediction: &'a WithGrad<Ten64>,
     target: &'a Ten64,
-) -> (f64, Box<dyn Fn(f64) -> Ten64 + 'a>) {
+) -> (f64, Box<FnF64Ten64<'a>>) {
     match get_backend() {
         Backend::Cuda => {
             #[cfg(feature = "cuda")]
@@ -134,7 +141,7 @@ pub fn sgd(w: &mut WithGrad<Ten64>, lr: f64) {
 /// Attempts CUDA → WGPU → CPU, depending on availability and features.
 pub fn relu(
     input: &WithGrad<Ten64>,
-) -> (Ten64, Box<dyn Fn(&Ten64) -> Ten64 + '_>) {
+) -> (Ten64, Box<FnTen64To>) {
     match get_backend() {
         Backend::Cuda => {
             #[cfg(feature = "cuda")]

@@ -42,23 +42,47 @@
 //!
 //! # Example
 //!
-//! ```no_run
-//! # use briny_ai::tensors::Tensor;
-//! # use briny_ai::modelio::{save_model, load_model};
-//! let tensor = Tensor::new(vec![2, 2], vec![1.0, 2.0, 3.0, 4.0]);
+//! ```rust
+//! use briny_ai::tensors::Tensor;
+//! use briny_ai::modelio::{save_model, load_model};
+//! 
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let tensor = Tensor::new(vec![2, 2], vec![1.0, 2.0, 3.0, 4.0]);
 //!
-//! // Save a list of tensors
-//! save_model("model.bpat", &[tensor.clone()]).unwrap();
+//!     // Save a list of tensors
+//!     save_model("model.bpat", &[tensor.clone()])?;
 //!
-//! // Load them back
-//! let tensors = load_model("model.bpat").unwrap();
-//! println!("Recovered: {:?}", tensors);
+//!     // Load them back
+//!     let tensors = load_model("model.bpat")?;
+//!     println!("Recovered: {:?}", tensors);
+//! 
+//!     Ok(())
+//! }
 //! ```
 
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use crate::tensors::Tensor;
 use std::error::Error;
+use briny::prelude::*;
+
+const BPAT_MAGIC: &[u8; 4] = b"bpat";
+
+/// Internal representation of a packed tensor.
+struct PackedTensor {
+    shape: Vec<u64>,
+    data: Vec<f64>,
+}
+
+impl Validate for PackedTensor {
+    fn validate(&self) -> Result<(), ValidationError> {
+        let expected = self.shape.iter().product::<u64>() as usize;
+        if self.data.len() != expected {
+            return Err(ValidationError);
+        }
+        Ok(())
+    }
+}
 
 /// Save a list of tensors to a `.bpat` file.
 /// 
@@ -122,38 +146,42 @@ pub fn load_model(path: &str) -> Result<Vec<Tensor<f64>>, Box<dyn Error>> {
     let mut file = BufReader::new(File::open(path)?);
     let mut buf8 = [0u8; 8];
 
-    // check magic header
+    // magic header
     let mut magic = [0u8; 4];
     file.read_exact(&mut magic)?;
-    if &magic != b"bpat" {
+    if &magic != BPAT_MAGIC {
         return Err("invalid magic header".into());
     }
 
-    // read tensor count
+    // tensor count
     let mut count = [0u8; 1];
-    file.read_exact(&mut count).map_err(|_| "file too short or corrupt")?;
+    file.read_exact(&mut count)?;
     let count = count[0] as usize;
 
     let mut tensors = Vec::with_capacity(count);
 
     for _ in 0..count {
         file.read_exact(&mut buf8)?;
-        let dims = u64::from_le_bytes(buf8) as usize;
+        let ndim = u64::from_le_bytes(buf8) as usize;
 
-        let mut shape = vec![0usize; dims];
-        for dim in &mut shape {
+        let mut shape = Vec::with_capacity(ndim);
+        for _ in 0..ndim {
             file.read_exact(&mut buf8)?;
-            *dim = u64::from_le_bytes(buf8) as usize;
+            shape.push(u64::from_le_bytes(buf8));
         }
 
-        let size = shape.iter().product();
-        let mut data = vec![0.0f64; size];
-        for val in &mut data {
+        let size: usize = shape.iter().product::<u64>() as usize;
+        let mut data = Vec::with_capacity(size);
+        for _ in 0..size {
             file.read_exact(&mut buf8)?;
-            *val = f64::from_le_bytes(buf8);
+            data.push(f64::from_le_bytes(buf8));
         }
 
-        tensors.push(Tensor::new(shape.clone(), data));
+        let raw_tensor = PackedTensor { shape, data };
+        let trusted = TrustedData::new(raw_tensor)?;
+        let inner = trusted.into_inner();
+        let shape_usize: Vec<usize> = inner.shape.iter().map(|&x| x as usize).collect();
+        tensors.push(Tensor::new(shape_usize, inner.data));
     }
 
     Ok(tensors)

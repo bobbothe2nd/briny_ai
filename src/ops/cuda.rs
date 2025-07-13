@@ -1,12 +1,10 @@
 use crate::tensors::{WithGrad, Ten64};
+use crate::ops::dispatch::{FnToDoubleTen64, FnF64Ten64, FnTen64To};
 
 pub fn cuda_matmul(
     a: &WithGrad<Ten64>,
     b: &WithGrad<Ten64>,
-) -> Option<(
-    Ten64,
-    Box<dyn Fn(&Ten64) -> (Ten64, Ten64)>,
-)> {
+) -> Option<(Ten64, Box<FnToDoubleTen64>)> {
     // TODO: implement using `cust` crate
     super::wgpu::wgpu_matmul(a, b) // wgpu fallback
 }
@@ -14,14 +12,14 @@ pub fn cuda_matmul(
 pub fn cuda_mse_loss<'a>(
     prediction: &'a WithGrad<Ten64>,
     target: &'a Ten64,
-) -> Option<(f64, Box<dyn Fn(f64) -> Ten64 + 'a>)> {
+) -> Option<(f64, Box<FnF64Ten64<'a>>)> {
     // TODO: implement using GPU kernel
     super::wgpu::wgpu_mse_loss(prediction, target) // wgpu fallback
 }
 
 pub fn cuda_relu(
     input: &WithGrad<Ten64>,
-) -> Option<(Ten64, Box<dyn Fn(&Ten64) -> Ten64 + '_>)> {
+) -> Option<(Ten64, Box<FnTen64To>)> {
     // TODO: implement GPU ReLU
     super::wgpu::wgpu_relu(input) // wgpu fallback
 }

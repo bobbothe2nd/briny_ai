@@ -5,7 +5,7 @@ use std::path::Path;
 use briny_ai::backprop::{matmul, mse_loss, relu, sgd};
 use briny_ai::modelio::{load_model, save_model};
 use briny_ai::tensors::{Tensor, WithGrad};
-use briny_ai::backend::{Backend, set_backend, get_backend};
+use briny_ai::backend::{Backend, set_backend};
 
 use flate2::read::GzDecoder;
 use reqwest::blocking::get;
@@ -81,7 +81,6 @@ fn main() {
     let y_data: Vec<f64> = labels.iter().take(n_samples).flat_map(|y| y.clone()).collect();
 
     set_backend(Backend::Wgpu);
-    println!("Current backend: {:#?}", get_backend());
 
     let x = WithGrad {
         value: Tensor::new(vec![n_samples, input_dim], x_data),
@@ -118,7 +117,7 @@ fn main() {
         };
         let (loss, back_loss) = mse_loss(&z2_wrapped, &y);
 
-        if epoch % 25 == 0 {
+        if ( epoch + 1 ) % 25 == 0 {
             println!("Epoch {}: Loss = {:.6}", epoch, loss);
         }
 

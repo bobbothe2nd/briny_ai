@@ -13,21 +13,92 @@
 //! to the GPU for compute and returned as f64 to integrate with the rest of the framework.
 //!
 //! Most functions return both forward results and backward closures for autograd.
-//! 
 
 use crate::tensors::{Tensor, WithGrad, Ten64};
 use wgpu::util::DeviceExt;
+use briny::prelude::*;
+use crate::ops::dispatch::{FnF64Ten64, FnTen64To, FnToDoubleTen64};
 
 const MATMUL: &str = include_str!("shaders/matmul.wgsl");
 const MSE_LOSS: &str = include_str!("shaders/mse_loss.wgsl");
 const RELU: &str = include_str!("shaders/relu.wgsl");
 const SGD: &str = include_str!("shaders/sgd.wgsl");
 
+/// Basic wrapper for common GPU errors.
 #[derive(Debug)]
 pub enum GpuError {
     Adapter(wgpu::RequestAdapterError),
     Device(wgpu::RequestDeviceError),
 }
+
+impl std::fmt::Display for GpuError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GpuError::Adapter(e) => write!(f, "Adapter error: {e}"),
+            GpuError::Device(e) => write!(f, "Device error: {e}")
+        }
+    }
+}
+
+/// Wrapper for a `GpuError` or `ValidationError` depending on how it fails.
+#[derive(Debug)]
+pub enum GpuFailureKind {
+    Gpu(GpuError),
+    Validation(ValidationError),
+}
+
+impl std::fmt::Display for GpuFailureKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GpuFailureKind::Gpu(err) => write!(f, "GPU error: {err}"),
+            GpuFailureKind::Validation(err) => write!(f, "Validation error: {err}"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GpuFailure {
+    pub kind: Option<GpuFailureKind>,
+    pub message: Option<String>,
+}
+
+impl From<GpuError> for GpuFailure {
+    fn from(kind: GpuError) -> Self {
+        Self { kind: Some(GpuFailureKind::Gpu(kind)), message: None }
+    }
+}
+
+impl From<ValidationError> for GpuFailure {
+    fn from(kind: ValidationError) -> Self {
+        Self { kind: Some(GpuFailureKind::Validation(kind)), message: None }
+    }
+}
+
+impl From<&str> for GpuFailure {
+    fn from(msg: &str) -> Self {
+        Self { kind: None, message: Some(msg.to_string()) }
+    }
+}
+
+impl From<String> for GpuFailure {
+    fn from(msg: String) -> Self {
+        Self { kind: None, message: Some(msg) }
+    }
+}
+
+impl std::fmt::Display for GpuFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if let Some(kind) = &self.kind {
+            write!(f, "GPU failure: {kind}")
+        } else if let Some(msg) = &self.message {
+            write!(f, "GPU failure: {msg}")
+        } else {
+            write!(f, "Unknown GPU failure")
+        }
+    }
+}
+
+impl std::error::Error for GpuFailure {}
 
 /// Holds the WGPU device and queue used for executing compute pipelines.
 /// 
@@ -57,8 +128,10 @@ impl GpuContext {
     /// Only panics if called via `lazy_static!` and the initialization fails
     ///
     /// # Example
-    /// ```
-    /// let ctx = GpuContext::new().unwrap();
+    /// ```rust
+    /// use briny_ai::ops::wgpu::GpuContext;
+    /// 
+    /// let ctx = GpuContext::new()?;
     /// println!("Device: {:?}", ctx.device.limits());
     /// ```
     pub fn new() -> Result<Self, GpuError> {
@@ -80,14 +153,61 @@ impl GpuContext {
     }
 }
 
+/// Secure wrapper for WGSL source code extracted from files.
+pub struct WgslSource<'a>(pub &'a str);
+
+impl<'a> Validate for WgslSource<'a> {
+    fn validate(&self) -> Result<(), ValidationError> {
+        let src = self.0;
+
+        // Basic sanity checks
+        if src.len() > 65536 {
+            return Err(ValidationError);
+        }
+
+        if !src.contains("fn main") {
+            return Err(ValidationError);
+        }
+
+        if src.contains("import") || src.contains("#include") {
+            return Err(ValidationError); // Disallow source inclusion
+        }
+
+        // Disallow forbidden patterns
+        let forbidden = ["asm", "unsafe", "ptr", "std::"];
+        if forbidden.iter().any(|bad| src.contains(bad)) {
+            return Err(ValidationError);
+        }
+
+        Ok(())
+    }
+}
+
+/// Opens a WGSL shader and returns the validated, labeled contents.
+/// 
+/// # In Detail
+/// - Opens a WGSL shader, contains it in a secure wrapper, ensures safety and validates it.
+/// - Once validated, the shader is labeled and assigned to a device, unwrapped, and returned.
+pub fn load_shader(
+    device: &wgpu::Device,
+    label: &str,
+    source: &str,
+) -> Result<wgpu::ShaderModule, GpuFailure> {
+    WgslSource(source).validate()?; // briny-based check
+
+    Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    }))
+}
+
 lazy_static::lazy_static! {
     static ref GPU_CONTEXT: GpuContext = GpuContext::new().expect("Failed to initialize GPU context");
-    static ref MATMUL_SHADER: wgpu::ShaderModule = {
-        GPU_CONTEXT.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("matmul"),
-            source: wgpu::ShaderSource::Wgsl(MATMUL.into()),
-        })
-    };
+    static ref MATMUL_SHADER: wgpu::ShaderModule = load_shader(
+        &GPU_CONTEXT.device,
+        "matmul",
+        MATMUL
+    ).expect("MATMUL shader failed validation or compilation");
     static ref MATMUL_BIND_GROUP_LAYOUT: wgpu::BindGroupLayout = {
         GPU_CONTEXT.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("matmul_bgl"),
@@ -324,6 +444,29 @@ lazy_static::lazy_static! {
     };
 }
 
+fn as_bytes<T: Copy>(data: &[T]) -> &[u8] {
+    let len = std::mem::size_of_val(data);
+    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, len) }
+}
+
+fn bytes_to_f32_slice(data: &[u8]) -> Result<&[f32], &'static str> {
+    use std::mem::{align_of, size_of};
+
+    if data.as_ptr() as usize % align_of::<f32>() != 0 {
+        return Err("unaligned buffer");
+    }
+
+    if data.len() % size_of::<f32>() != 0 {
+        return Err("buffer length is not a multiple of f32");
+    }
+
+    let len = data.len() / size_of::<f32>();
+    let ptr = data.as_ptr() as *const f32;
+    unsafe {
+        Ok(std::slice::from_raw_parts(ptr, len))
+    }
+}
+
 /// Performs matrix multiplication on the GPU using a precompiled WGSL shader.
 ///
 /// Accepts two input tensors `a` (shape `[m, k]`) and `b` (shape `[k, n]`)
@@ -338,14 +481,10 @@ lazy_static::lazy_static! {
 /// # Notes
 /// - Input data is cast from f64 → f32 for GPU
 /// - Output is cast back from f32 → f64
-/// - Backward pass is performed on the CPU for precision
 pub fn wgpu_matmul(
     a: &WithGrad<Ten64>,
     b: &WithGrad<Ten64>,
-) -> Option<(Ten64, Box<dyn Fn(&Ten64) -> (Ten64, Ten64)>,)> {
-    // with this line of code, it all works - actually, it works *better* just *slower* compared to CPU
-    // return Some(super::cpu::matmul(a, b));
-
+) -> Option<(Ten64, Box<FnToDoubleTen64>)> {
     let (m, k) = (a.value.shape[0], a.value.shape[1]);
     let (k2, n) = (b.value.shape[0], b.value.shape[1]);
     if k != k2 {
@@ -377,7 +516,51 @@ pub fn wgpu_matmul(
     let a_val = a.value.clone();
     let b_val = b.value.clone();
 
-    let back = Box::new(move |grad: &Ten64| grad.matmul(&a_val, &b_val));
+    let back = Box::new(move |grad: &Ten64| {
+        let grad_data: Vec<f32> = grad.data.iter().map(|&v| v as f32).collect();
+        let a_data: Vec<f32> = a_val.data.iter().map(|&v| v as f32).collect();
+        let b_data: Vec<f32> = b_val.data.iter().map(|&v| v as f32).collect();
+
+        // transpose B → Bᵀ for dA = grad @ Bᵀ
+        let mut b_t_data = vec![0.0f32; b_val.data.len()];
+        for i in 0..n {
+            for j in 0..k {
+                b_t_data[i * k + j] = b_data[j * n + i];
+            }
+        }
+
+        // transpose A → Aᵀ for dB = Aᵀ @ grad
+        let mut a_t_data = vec![0.0f32; a_val.data.len()];
+        for i in 0..k {
+            for j in 0..m {
+                a_t_data[i * m + j] = a_data[j * k + i];
+            }
+        }
+
+        let mut da_f32 = vec![0.0f32; m * k];
+        let mut db_f32 = vec![0.0f32; k * n];
+
+        // ∂L/∂A = grad @ Bᵀ
+        pollster::block_on(run_matmul_shader(
+            &grad_data,
+            &b_t_data,
+            &mut da_f32,
+            m, n, k, // note: Bᵀ shape = [n x k] → input is [m x n] × [n x k]
+        )).unwrap();
+
+        // ∂L/∂B = Aᵀ @ grad
+        pollster::block_on(run_matmul_shader(
+            &a_t_data,
+            &grad_data,
+            &mut db_f32,
+            k, m, n, // note: Aᵀ shape = [k x m] → input is [k x m] × [m x n]
+        )).unwrap();
+
+        let da = Tensor::new(vec![m, k], da_f32.into_iter().map(|v| v as f64).collect());
+        let db = Tensor::new(vec![k, n], db_f32.into_iter().map(|v| v as f64).collect());
+
+        (da, db)
+    });
 
     Some((out_tensor, back))
 }
@@ -389,26 +572,26 @@ async fn run_matmul_shader(
     m: usize,
     k: usize,
     n: usize,
-) -> Result<(), GpuError> {
+) -> Result<(), GpuFailure> {
     let device = &GPU_CONTEXT.device;
     let queue = &GPU_CONTEXT.queue;
 
-    let dims = [m as u32, k as u32, n as u32];
+    let dims = [m as u32, k as u32, n as u32, 0u32];
     let dims_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("dims"),
-        contents: bytemuck::cast_slice(&dims),
+        contents: as_bytes(&dims),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
     let a_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("A"),
-        contents: bytemuck::cast_slice(a),
+        contents: as_bytes(a),
         usage: wgpu::BufferUsages::STORAGE,
     });
 
     let b_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("B"),
-        contents: bytemuck::cast_slice(b),
+        contents: as_bytes(b),
         usage: wgpu::BufferUsages::STORAGE,
     });
 
@@ -457,7 +640,7 @@ async fn run_matmul_shader(
         });
         compute_pass.set_pipeline(pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        compute_pass.dispatch_workgroups((n as u32).div_ceil(8), (m as u32).div_ceil(8), 1);
+        compute_pass.dispatch_workgroups((n as u32).div_ceil(16), (m as u32).div_ceil(16), 1);
     }
 
     let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -471,11 +654,13 @@ async fn run_matmul_shader(
 
     queue.submit(Some(encoder.finish()));
     let buffer_slice = staging_buffer.slice(..);
-    buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-    let _ = device.poll(wgpu::PollType::Wait);
+    buffer_slice.map_async(wgpu::MapMode::Read, |result| {
+        assert!(result.is_ok());
+    });
+    device.poll(wgpu::PollType::Wait).unwrap();
 
     let data = buffer_slice.get_mapped_range();
-    out.copy_from_slice(bytemuck::cast_slice(&data));
+    out.copy_from_slice(bytes_to_f32_slice(&data)?);
     drop(data);
     staging_buffer.unmap();
 
@@ -501,7 +686,7 @@ async fn run_matmul_shader(
 pub fn wgpu_mse_loss<'a>(
     pred: &'a WithGrad<Ten64>,
     target: &'a Ten64,
-) -> Option<(f64, Box<dyn Fn(f64) -> Ten64 + 'a>)> {
+) -> Option<(f64, Box<FnF64Ten64<'a>>)> {
     let p: Vec<f32> = pred.value.data.iter().map(|&x| x as f32).collect();
     let t: Vec<f32> = target.data.iter().map(|&x| x as f32).collect();
 
@@ -519,7 +704,7 @@ pub fn wgpu_mse_loss<'a>(
     Some((result as f64, back))
 }
 
-async fn run_mse_loss_shader(prediction: &[f32], target: &[f32]) -> Result<f32, GpuError> {
+async fn run_mse_loss_shader(prediction: &[f32], target: &[f32]) -> Result<f32, GpuFailure> {
     let device = &GPU_CONTEXT.device;
     let queue = &GPU_CONTEXT.queue;
 
@@ -530,13 +715,13 @@ async fn run_mse_loss_shader(prediction: &[f32], target: &[f32]) -> Result<f32, 
     // === Buffers ===
     let pred_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("prediction"),
-        contents: bytemuck::cast_slice(prediction),
+        contents: as_bytes(prediction),
         usage: wgpu::BufferUsages::STORAGE,
     });
 
     let target_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("target"),
-        contents: bytemuck::cast_slice(target),
+        contents: as_bytes(target),
         usage: wgpu::BufferUsages::STORAGE,
     });
 
@@ -599,7 +784,7 @@ async fn run_mse_loss_shader(prediction: &[f32], target: &[f32]) -> Result<f32, 
     let _ = device.poll(wgpu::PollType::Wait);
 
     let view = staging.slice(..).get_mapped_range();
-    let loss_terms: &[f32] = bytemuck::cast_slice(&view);
+    let loss_terms: &[f32] = bytes_to_f32_slice(&view)?;
     let total_loss = loss_terms.iter().sum::<f32>() / len as f32;
     drop(view);
     staging.unmap();
@@ -621,7 +806,7 @@ async fn run_mse_loss_shader(prediction: &[f32], target: &[f32]) -> Result<f32, 
 /// - Output and backward gradient are returned in f64 for integration
 pub fn wgpu_relu(
     input: &WithGrad<Ten64>,
-) -> Option<(Ten64, Box<dyn Fn(&Ten64) -> Ten64 + '_>)> {
+) -> Option<(Ten64, Box<FnTen64To>)> {
     let data: Vec<f32> = input.value.data.iter().map(|&x| x as f32).collect();
     let mut output = vec![0.0f32; data.len()];
 
@@ -647,13 +832,13 @@ pub fn wgpu_relu(
     Some((output_tensor, Box::new(back)))
 }
 
-async fn run_relu_shader(input: &[f32], output: &mut [f32]) -> Result<(), GpuError> {
+async fn run_relu_shader(input: &[f32], output: &mut [f32]) -> Result<(), GpuFailure> {
     let device = &GPU_CONTEXT.device;
     let queue = &GPU_CONTEXT.queue;
 
     let input_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("input"),
-        contents: bytemuck::cast_slice(input),
+        contents: as_bytes(input),
         usage: wgpu::BufferUsages::STORAGE,
     });
 
@@ -711,7 +896,7 @@ async fn run_relu_shader(input: &[f32], output: &mut [f32]) -> Result<(), GpuErr
     let _ = device.poll(wgpu::PollType::Wait);
 
     let data = staging.slice(..).get_mapped_range();
-    output.copy_from_slice(bytemuck::cast_slice(&data));
+    output.copy_from_slice(bytes_to_f32_slice(&data)?);
     drop(data);
     staging.unmap();
 
@@ -743,26 +928,26 @@ pub fn wgpu_sgd(w: &mut WithGrad<Ten64>, lr: f64) -> bool {
     true
 }
 
-async fn run_sgd_shader(weights: &mut [f32], grad: &[f32], lr: f32) -> Result<(), GpuError> {
+async fn run_sgd_shader(weights: &mut [f32], grad: &[f32], lr: f32) -> Result<(), GpuFailure> {
     assert_eq!(weights.len(), grad.len());
     let device = &GPU_CONTEXT.device;
     let queue = &GPU_CONTEXT.queue;
 
     let weights_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("weights"),
-        contents: bytemuck::cast_slice(weights),
+        contents: as_bytes(weights),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
 
     let grad_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("grad"),
-        contents: bytemuck::cast_slice(grad),
+        contents: as_bytes(grad),
         usage: wgpu::BufferUsages::STORAGE,
     });
 
     let lr_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("lr"),
-        contents: bytemuck::cast_slice(&[lr]),
+        contents: as_bytes(&[lr]),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
@@ -817,7 +1002,7 @@ async fn run_sgd_shader(weights: &mut [f32], grad: &[f32], lr: f32) -> Result<()
     let _ = device.poll(wgpu::PollType::Wait);
 
     let view = staging.slice(..).get_mapped_range();
-    let updated_weights: &[f32] = bytemuck::cast_slice(&view);
+    let updated_weights: &[f32] = bytes_to_f32_slice(&view)?;
     weights.copy_from_slice(updated_weights);
     drop(view);
     staging.unmap();

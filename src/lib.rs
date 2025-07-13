@@ -20,19 +20,12 @@
 //! Enable with Cargo features:
 //!
 //! - `simd` — Enables AVX2 SIMD acceleration on supported x86_64 targets
-//! - `gpu` — Enables GPU compute shaders via WGPU
+//! - `wgpu` — Enables GPU compute shaders via WGPU
 //!
 //! ## Safety Notes
 //!
 //! - SIMD operations are gated behind feature flags and use `unsafe` internally.
 //! - GPU support assumes buffers are correctly sized and aligned — validated at runtime.
-//!
-//! ## Roadmap
-//!
-//! - [ ] CNN primitives (conv2d, pooling)
-//! - [ ] GPU gradient computation
-//! - [ ] Model serialization
-//! - [ ] Integration with `ndarray` or `nalgebra`
 
 #![allow(unexpected_cfgs)] // don't warn me of unused platforms
 #![allow(dead_code)] // don't warn me of unused enums
