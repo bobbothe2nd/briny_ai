@@ -3,15 +3,19 @@
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let base_idx = global_id.x * 4u;
-    let len = arrayLength(&input);
+    let i = global_id.x * 4u;
 
-    // process 4 elements per thread
-    for (var offset = 0u; offset < 4u; offset = offset + 1u) {
-        let i = base_idx + offset;
-        if (i >= len) {
-            break;
-        }
-        output[i] = max(input[i], 0.0);
-    }
+    let v = vec4<f32>(
+        input[i + 0u],
+        input[i + 1u],
+        input[i + 2u],
+        input[i + 3u],
+    );
+
+    let result = max(v, vec4<f32>(0.0));
+
+    output[i + 0u] = result.x;
+    output[i + 1u] = result.y;
+    output[i + 2u] = result.z;
+    output[i + 3u] = result.w;
 }

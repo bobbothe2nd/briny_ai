@@ -100,13 +100,13 @@ checksum = "0d8c1fef690941d3e7788d328517591fecc684c084084702d6ff1641e993699a"
 
 [[package]]
 name = "briny"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4b971481ed69df2e8deeb8fb028e1623e9f2f724447fceaaf13bca4a4253133"
+checksum = "98efaeb53906b7eb51bb02a588e90590bb294e0c8e11222ca9c3c5f01a54d452"
 
 [[package]]
 name = "briny_ai"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "briny",
  "flate2",
@@ -1792,7 +1792,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

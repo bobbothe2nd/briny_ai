@@ -1,9 +1,0 @@
-# add this to your .cargo/config.toml to optimize for SIMD
-[build]
-rustflags = [
-  "-C", "target-cpu=native",
-  "-C", "opt-level=3",
-  "-C", "target-feature=+avx2,+fma",
-  "-C", "codegen-units=1",
-  "-C", "link-arg=-Wl,--as-needed",
-]

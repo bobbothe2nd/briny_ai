@@ -32,8 +32,6 @@
 //! - SIMD paths use `unsafe` blocks and assume 64-bit AVX2-capable CPUs
 //! - Runtime checks are encouraged but not enforced in this module
 
-#[cfg(feature = "simd")]
-use std::arch::x86_64::*;
 use rayon::prelude::*;
 use crate::{ops::dispatch::{FnF64Ten64, FnTen64To, FnToDoubleTen64}, tensors::{Ten64, Tensor, WithGrad}};
 

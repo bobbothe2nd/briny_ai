@@ -19,7 +19,7 @@
 //! ```rust
 //! use briny_ai::backend::Backend;
 //! use briny_ai::backprop::matmul;
-//! use briny_ai::WithGrad;
+//! use briny_ai::tensors::WithGrad;
 //! use briny_ai::tensor;
 //! 
 //! let a = WithGrad::new(tensor!([[5.0, 4.0], [3.0, 2.0]]));

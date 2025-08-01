@@ -27,10 +27,11 @@
 //! - SIMD operations are gated behind feature flags and use `unsafe` internally.
 //! - GPU support assumes buffers are correctly sized and aligned — validated at runtime.
 
-#![allow(unexpected_cfgs)] // don't warn me of unused platforms
-#![allow(dead_code)] // don't warn me of unused enums
+#![forbid(missing_docs)]
 
 pub mod prelude {
+    //! Common re-exports for ease of use.
+    
     pub use crate::tensors::{Tensor, WithGrad};
     pub use crate::backprop::*;
     pub use crate::modelio::{save_model, load_model};
@@ -41,5 +42,3 @@ pub mod backprop;
 pub mod modelio;
 pub mod ops;
 pub mod backend;
-
-pub use tensors::{Tensor, WithGrad};

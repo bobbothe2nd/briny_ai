@@ -29,8 +29,11 @@
 use crate::backend::{get_backend, Backend};
 use crate::tensors::{WithGrad, Ten64};
 
+/// A dynamic type alias used by `matmul`.
 pub type FnToDoubleTen64 = dyn Fn(&Ten64) -> (Ten64, Ten64);
+/// A dynamic type alias used by `mse_loss`
 pub type FnF64Ten64<'a> = dyn Fn(f64) -> Ten64 + 'a;
+/// A dynamic type alias used by `relu`
 pub type FnTen64To<'a> = dyn Fn(&Ten64) -> Ten64 + 'a;
 
 /// Dispatches matrix multiplication to the selected backend (CPU, WGPU, or CUDA).

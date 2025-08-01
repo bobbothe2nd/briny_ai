@@ -12,12 +12,6 @@ struct MatDims {
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let ta = (dims.flags & 1u) != 0u;
-    let tb = (dims.flags & 2u) != 0u;
-
-    // A access: A[ta ? i * m + row : row * k + i]
-    // B access: B[tb ? col * k + i : i * n + col]
-
     let row = gid.y;
     let col = gid.x;
 
@@ -29,37 +23,54 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    var acc = 0.0;
+    let ta = (dims.flags & 1u) != 0u;
+    let tb = (dims.flags & 2u) != 0u;
 
-    let k4 = k / 4u; // number of vec4s
-    let baseA = row * k;
-    let baseB = col;
+    let acc_base = 0.0;
+    var acc = acc_base;
+
+    let k4 = k / 4u;
+    let rem = k % 4u;
 
     for (var i = 0u; i < k4; i = i + 1u) {
-        let ai = baseA + i * 4u;
-        let bi = i * 4u * n + baseB;
+        let ki = i * 4u;
+
+        // Indexing for A: handle transpose with select
+        let a0 = select(row * k + ki + 0u, (ki + 0u) * m + row, ta);
+        let a1 = select(row * k + ki + 1u, (ki + 1u) * m + row, ta);
+        let a2 = select(row * k + ki + 2u, (ki + 2u) * m + row, ta);
+        let a3 = select(row * k + ki + 3u, (ki + 3u) * m + row, ta);
 
         let va = vec4<f32>(
-            A[ai + 0u],
-            A[ai + 1u],
-            A[ai + 2u],
-            A[ai + 3u],
+            A[a0],
+            A[a1],
+            A[a2],
+            A[a3]
         );
 
+        // Indexing for B: handle transpose with select
+        let b0 = select((ki + 0u) * n + col, col * k + ki + 0u, tb);
+        let b1 = select((ki + 1u) * n + col, col * k + ki + 1u, tb);
+        let b2 = select((ki + 2u) * n + col, col * k + ki + 2u, tb);
+        let b3 = select((ki + 3u) * n + col, col * k + ki + 3u, tb);
+
         let vb = vec4<f32>(
-            B[bi + 0u * n],
-            B[bi + 1u * n],
-            B[bi + 2u * n],
-            B[bi + 3u * n],
+            B[b0],
+            B[b1],
+            B[b2],
+            B[b3]
         );
 
         acc = acc + dot(va, vb);
     }
 
-    // Tail handling if k not divisible by 4
-    let rem = k % 4u;
-    for (var i = k - rem; i < k; i = i + 1u) {
-        acc = acc + A[row * k + i] * B[i * n + col];
+    // Tail handling for remainder
+    if rem != 0u {
+        for (var i = k - rem; i < k; i = i + 1u) {
+            let a_idx = select(row * k + i, i * m + row, ta);
+            let b_idx = select(i * n + col, col * k + i, tb);
+            acc = acc + A[a_idx] * B[b_idx];
+        }
     }
 
     C[row * n + col] = acc;

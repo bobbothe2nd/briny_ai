@@ -20,7 +20,7 @@ This library provides low-level primitives for defining and training differentia
 - GPU compute operations return structured error results instead of panicking, so your programs can gracefully handle failures.
 - When loading or saving tensors, `briny_ai` verifies all data explicitly, helping prevent corrupted or malicious files from crashing your app or introducing bugs.
 
-This explicit, zero-unsafe design makes `briny_ai` a solid choice for embedded systems, security-focused applications, or any Rust developer who wants strong guarantees about data integrity without giving up Rust’s ease of use.
+This explicit, minimal unsafe design makes `briny_ai` a solid choice for embedded systems, security-focused applications, or any Rust developer who wants strong guarantees about data integrity without giving up Rust’s ease of use.
 
 ## Features
 

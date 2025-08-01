@@ -27,7 +27,9 @@ const SGD: &str = include_str!("shaders/sgd.wgsl");
 /// Basic wrapper for common GPU errors.
 #[derive(Debug)]
 pub enum GpuError {
+    /// An error in requesting the addapter.
     Adapter(wgpu::RequestAdapterError),
+    /// An error in requesting the GPU (device).
     Device(wgpu::RequestDeviceError),
 }
 
@@ -43,7 +45,9 @@ impl std::fmt::Display for GpuError {
 /// Wrapper for a `GpuError` or `ValidationError` depending on how it fails.
 #[derive(Debug)]
 pub enum GpuFailureKind {
+    /// An error resulting from the GPU.
     Gpu(GpuError),
+    /// An error resulting from validating data.
     Validation(ValidationError),
 }
 
@@ -56,9 +60,12 @@ impl std::fmt::Display for GpuFailureKind {
     }
 }
 
+/// A type of error closely related to the GPU.
 #[derive(Debug)]
 pub struct GpuFailure {
+    /// The optional type of failure that occured.
     pub kind: Option<GpuFailureKind>,
+    /// The optional message explaining the failure.
     pub message: Option<String>,
 }
 
@@ -105,7 +112,9 @@ impl std::error::Error for GpuFailure {}
 /// Initialized once globally and reused for all operations via `lazy_static`.
 /// Provides the base hardware abstraction for launching compute shaders.
 pub struct GpuContext {
+    /// The actual GPU device.
     pub device: wgpu::Device,
+    /// A queue for information related to the device.
     pub queue: wgpu::Queue,
 }
 
@@ -833,6 +842,8 @@ pub fn wgpu_relu(
 }
 
 async fn run_relu_shader(input: &[f32], output: &mut [f32]) -> Result<(), GpuFailure> {
+    assert_eq!(output.len() % 4, 0);
+
     let device = &GPU_CONTEXT.device;
     let queue = &GPU_CONTEXT.queue;
 
@@ -930,6 +941,7 @@ pub fn wgpu_sgd(w: &mut WithGrad<Ten64>, lr: f64) -> bool {
 
 async fn run_sgd_shader(weights: &mut [f32], grad: &[f32], lr: f32) -> Result<(), GpuFailure> {
     assert_eq!(weights.len(), grad.len());
+    assert_eq!(weights.len() % 4, 0);
     let device = &GPU_CONTEXT.device;
     let queue = &GPU_CONTEXT.queue;
 

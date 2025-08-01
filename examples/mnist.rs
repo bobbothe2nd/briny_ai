@@ -99,7 +99,7 @@ fn main() {
         grad: Tensor::new(vec![hidden_dim, output_dim], vec![0.0; hidden_dim * output_dim]),
     };
 
-    for epoch in 0..200 {
+    for epoch in 0..1000 {
         let (z1, back1) = matmul(&x, &w1);
         let z1_wrapped = WithGrad {
             value: z1.clone(),

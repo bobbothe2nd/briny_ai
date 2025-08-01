@@ -45,7 +45,10 @@
 //! ```
 //! 
 //! Forward: x → matmul → relu → matmul → mse_loss → scalar
+//! 
 //! Backward: scalar grad ← mse_loss grad ← matmul grad ← relu grad ← matmul grad ← x.grad
+//! 
+//! Check the examples to learn how to make an AI crate.
 
 use briny::trust::UntrustedData;
 
@@ -56,11 +59,13 @@ use briny::trust::UntrustedData;
 /// - `data` holds the flattened content in row-major order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor<T> {
+    /// The shape of the Tensor, defining the dimensions.
     pub shape: Vec<usize>,
+    /// The data held, the length of which should be equal to the product of all elements of shape.
     pub data: Vec<T>,
 }
 
-/// A type alias meaning Tensor<f64>
+/// A type alias meaning `Tensor<f64>`
 pub type Ten64 = Tensor<f64>;
 
 /// A minimal trait that represents a tensor-like structure supporting gradients.
@@ -106,6 +111,7 @@ impl<T: Default + Clone> Tensor<T> {
 }
 
 impl<T: Copy + Default> Tensor<T> {
+    /// Transposes a 2D Tensor, effectively rotating its elements by 90 degrees.
     pub fn transpose(&self) -> Tensor<T> {
         assert_eq!(self.shape.len(), 2, "Transpose only supports 2D tensors");
         let (rows, cols) = (self.shape[0], self.shape[1]);
@@ -258,7 +264,9 @@ impl TensorGrad for Ten64 {
 /// Typically used as `WithGrad<Ten64>` or `WithGrad<f64>`.
 #[derive(Debug, Clone)]
 pub struct WithGrad<T> {
+    /// The value of the structure.
     pub value: T,
+    /// The gradient of the structure.
     pub grad: T,
 }
 
@@ -373,7 +381,7 @@ pub fn parse_tensor(json: &str) -> Result<Tensor<f64>, &'static str> {
 }
 
 fn validate_tensor(untrusted: UntrustedData<&str>) -> Result<Tensor<f64>, &'static str> {
-    let json = untrusted.value();
+    let json = untrusted.as_ref();
     let bytes = json.as_bytes();
     let mut idx = 0;
 
