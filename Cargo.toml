@@ -1,33 +1,6 @@
-[package]
-name = "briny_ai"
-version = "0.2.2"
-edition = "2024"
-rust-version = "1.88.0"
-description = "Minimal, secure autodiff + tensor engine with serialization"
-license = "MIT"
-documentation = "https://docs.rs/briny_ai"
-keywords = ["autograd", "tensor", "machine-learning"]
-categories = ["science", "mathematics", "data-structures"]
-repository = "https://github.com/bobbothe2nd/briny_ai"
-readme = "README.md"
-
-[dependencies]
-briny = "0.2.0"
-lazy_static = { version = "1.5.0", default-features = false, optional = true }
-pollster = { version = "0.4.0", default-features = false, optional = true }
-rayon = { version = "=1.10.0", default-features = false }
-wgpu = { version = "26.0.1", optional = true }
-
-[features]
-default = []
-simd = []
-wgpu = ["dep:wgpu", "dep:pollster", "dep:lazy_static"]
-cuda = ["dep:wgpu", "dep:pollster", "dep:lazy_static"]
-
-[package.metadata.docs.rs]
-all-features = true
-
-[dev-dependencies]
-reqwest = { version = "0.12", features = ["blocking"], default-features = false }
-flate2 = "1"
-rand = "0.9.1"
+[workspace]
+members = [
+    "crates/briny_ai",
+    "crates/briny-ai-proc",
+]
+resolver = "3"

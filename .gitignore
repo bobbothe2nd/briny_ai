@@ -2,6 +2,6 @@
 /target
 /mnist_data
 /mnist_model.bpat
-/test_model.bpat
 /xor_model.bpat
-/model.bpat
+/crates/briny_ai/model.bpat
+/crates/briny_ai/test_tensors.bpat
