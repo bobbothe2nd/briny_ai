@@ -1,6 +1,91 @@
-[workspace]
-members = [
-    "crates/briny_ai",
-    "crates/briny-ai-proc",
+[package]
+name = "briny_ai"
+version = "0.4.0"
+edition = "2021"
+rust-version = "1.83.0"
+description = "A tiny & efficient AI inference engine"
+license = "MIT"
+documentation = "https://docs.rs/briny_ai"
+keywords = ["autograd", "tensor", "machine-learning"]
+categories = ["science", "mathematics", "data-structures", "no-std", "no-std::no-alloc"]
+repository = "https://github.com/bobbothe2nd/briny_ai"
+readme = "README.md"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+incremental = true
+
+[profile.release.package."*"]
+opt-level = 3
+codegen-units = 1
+
+[features]
+# abstraction levels
+alloc = ["tensor_optim/alloc", "lazy_simd/alloc"] # no OS, but global allocator
+std = ["alloc", "lazy_simd/std", "dep:crc32fast"] # underlying OS exists
+
+# dynamically sized tensors
+# hint: do NOT enable this if you care about performance, memory efficiency, or portability
+dyntensor = ["alloc"]
+
+# tensor backends
+wgpu = ["dep:wgpu", "dep:lazy_static", "std"]
+cuda = ["wgpu", "std"]
+
+[dependencies]
+briny = "0.4.0"
+lazy_simd = "0.1.1"
+box_closure = "0.1.0"
+tensor_optim =  "0.2.1"
+crc32fast = { version = "1.5.0", default-features = false, optional = true }
+lazy_static = { version = "1.5.0", default-features = false, optional = true }
+
+# Windows
+[target.'cfg(target_family = "windows")'.dependencies.wgpu]
+version = "26.0.1"
+default-features = false
+features = ["wgsl", "dx12"]
+optional = true
+
+# macOS
+[target.'cfg(target_os = "macos")'.dependencies.wgpu]
+version = "26.0.1"
+default-features = false
+features = ["wgsl", "metal", "vulkan-portability", "angle"]
+optional = true
+
+# Linux (Vulkan + GLES for fallback)
+[target.'cfg(target_os = "linux")'.dependencies.wgpu]
+version = "26.0.1"
+default-features = false
+features = ["wgsl", "vulkan", "gles"]
+optional = true
+
+# WebAssembly (WebGPU)
+[target.'cfg(any(target_arch = "wasm32", target_arch = "wasm64", target_os = "wasi"))'.dependencies.wgpu]
+version = "26.0.1"
+default-features = false
+features = ["wgsl", "webgpu", "webgl"]
+optional = true
+
+[target.'cfg(not(any(target_arch = "wasm32", target_arch = "wasm64", target_os = "wasi", target_os = "linux", target_os = "macos", target_family = "windows")))'.dependencies.wgpu]
+version = "26.0.1"
+default-features = false
+features = [
+    "std",
+    "parking_lot",
+    "vulkan",
+    "vulkan-portability",
+    "angle",
+    "gles",
+    "dx12",
+    "metal",
+    "wgsl",
+    "webgpu",
 ]
-resolver = "3"
+optional = true
+
+[dev-dependencies]
+rand = "0.9.1"
+rand_distr = "0.5.1"

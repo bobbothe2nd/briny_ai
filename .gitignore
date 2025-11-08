@@ -1,7 +1,2 @@
 /Cargo.lock
 /target
-/mnist_data
-/mnist_model.bpat
-/xor_model.bpat
-/crates/briny_ai/model.bpat
-/crates/briny_ai/test_tensors.bpat

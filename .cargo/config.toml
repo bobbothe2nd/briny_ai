@@ -1,0 +1,5 @@
+[build]
+rustflags = [
+  "-C", "llvm-args=--inline-threshold=1000",
+  "-C", "link-arg=-Wl,-O1",
+]
