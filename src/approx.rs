@@ -134,7 +134,7 @@ pub enum ApproxEquality {
 }
 
 /// Approximates equality based off the relative difference.
-pub fn approx_eq<A: RelativeEq<B>, B>(a: &A, b: &B) -> bool {
+pub fn approx_eq<A: RelativeEq<B> + ?Sized, B: ?Sized>(a: &A, b: &B) -> bool {
     let eq = a.approx_eq(b);
     eq == ApproxEquality::Precise
 }

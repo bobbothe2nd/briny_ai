@@ -308,8 +308,8 @@ mod tests {
             4.0 - 0.1 * 0.4,
         ];
 
-        for (&u, &e) in updated.iter().zip(expected.iter()) {
-            assert!(approx_eq(u as f32, e));
+        for (&u, e) in updated.iter().zip(expected.iter()) {
+            assert!(approx_eq(&(u as f32), e));
         }
     }
 
@@ -331,8 +331,8 @@ mod tests {
 
         let updated = w.get_value().data();
         let expected = vec![5.0, 6.0, 7.0, 8.0];
-        for (&u, &e) in updated.iter().zip(expected.iter()) {
-            assert!(approx_eq(u as f32, e));
+        for (u, e) in updated.iter().zip(expected.iter()) {
+            assert!(approx_eq(u, e));
         }
     }
 

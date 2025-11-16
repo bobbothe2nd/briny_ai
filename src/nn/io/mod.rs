@@ -44,30 +44,6 @@
 //! - Assumes `f64` element type
 //! - Maximum 255 tensors per file (due to `u8` count limit)
 //! - No per-tensor metadata (names, dtypes, etc.)
-//!
-//! # Example
-//!
-//! ```rust
-//! #[cfg(feature = "std")] // file I/O only available under std
-//! fn main() -> Result<(), Box<dyn core::error::Error>> {
-//!     use briny_ai::nn::tensors::Tensor;
-//!     use briny_ai::nn::io::{save_tensors, load_tensors, BpatHeader};
-//!
-//!     let tensor = Tensor::new(&[2, 2], &[1.0, 2.0, 3.0, 4.0]);
-//!
-//!     // Save a list of tensors
-//!     save_tensors("checkpoints/test/model.bpat", &[tensor.clone()], BpatHeader::BpatV1)?;
-//!
-//!     // Load them back
-//!     let tensors = load_tensors::<f64>("checkpoints/test/model.bpat")?;
-//!     println!("Recovered: {:?}", tensors);
-//!
-//!     Ok(())
-//! }
-//!
-//! #[cfg(not(feature = "std"))]
-//! fn main() {}
-//! ```
 
 use crate::nn::tensors::TensorGrad;
 #[cfg(feature = "alloc")]

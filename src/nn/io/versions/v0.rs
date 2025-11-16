@@ -307,7 +307,7 @@ mod tests {
 
         let a = Tensor::new(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
         let b = Tensor::new(&[1, 4], &[7.0, 8.0, 9.0, 10.0]);
-        let original = [a.into_vectensor(), b.into_vectensor()];
+        let original = [a.as_vectensor(), b.as_vectensor()];
 
         save_tensors("checkpoints/test/v0.bpat", &original).unwrap();
 

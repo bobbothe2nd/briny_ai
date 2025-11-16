@@ -76,7 +76,7 @@ checksum = "f323c4cf80de41872956623f8e5f268360a71ce7cfa1275473db157d8bb2751c"
 
 [[package]]
 name = "briny_ai"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "box_closure",
  "briny",

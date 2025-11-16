@@ -240,7 +240,7 @@ mod tests {
         let (loss, _) = wgpu_mse_loss(&pred, &target).expect("wgpu_mse_loss failed");
 
         // expected MSE: mean((pred - target)^2) = ((0-0)^2 + (0.5-1)^2 + (1-1)^2) / 3 = (0 + 0.25 + 0) / 3 = 0.0833
-        assert_ne!(loss.approx_eq(0.0833333), ApproxEquality::Scarce);
+        assert_ne!(loss.approx_eq(&0.0833333), ApproxEquality::Scarce);
     }
 
     #[test]
@@ -268,7 +268,7 @@ mod tests {
             .map(|(&p, &t)| 2.0 * (p - t) / 3.0)
             .collect();
 
-        for (&g, &e) in grad_tensor.data().iter().zip(expected_grads.iter()) {
+        for (g, e) in grad_tensor.data().iter().zip(expected_grads.iter()) {
             assert!(approx_eq(g, e));
         }
     }

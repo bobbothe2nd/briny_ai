@@ -782,7 +782,6 @@ mod tests {
     use crate::approx::approx_eq;
     use crate::nn::tensors::{Tensor, WithGrad};
 
-    // Simple CPU matmul for checking results
     fn cpu_matmul(
         a: &[TensorFloat],
         a_shape: (usize, usize),
@@ -821,11 +820,9 @@ mod tests {
 
         let expected = cpu_matmul(&a_data, (2, 2), &b_data, (2, 2));
 
-        // Check shape
         assert_eq!(out.shape(), &[2, 2]);
 
-        // Check values approximately equal (allow some floating error)
-        for (&v, &e) in out.data().iter().zip(expected.iter()) {
+        for (v, e) in out.data().iter().zip(expected.iter()) {
             assert!(approx_eq(v, e));
         }
     }
@@ -841,13 +838,11 @@ mod tests {
         let result = wgpu_matmul(&a, &b).expect("matmul failed");
         let (_, back_fn) = result;
 
-        // Fake gradient tensor (same shape as output)
         let grad_data = [1.0, 1.0, 1.0, 1.0];
         let grad = Tensor::new(&[2, 2], &grad_data);
 
         let (d_a, d_b) = back_fn(grad);
 
-        // Shapes of gradients must match inputs
         assert_eq!(d_a.shape(), a.get_value().shape());
         assert_eq!(d_b.shape(), b.get_value().shape());
     }
@@ -856,8 +851,6 @@ mod tests {
     fn wgpu_matmul_shape_mismatch() {
         let a = WithGrad::new(Tensor::new(&[2, 3], &[1.0; 6]));
         let b = WithGrad::new(Tensor::new(&[4, 2], &[1.0; 8]));
-
-        // k dimension does not match (3 vs 4)
 
         #[cfg(feature = "dyntensor")]
         assert!(wgpu_matmul(&a, &b).is_none());
