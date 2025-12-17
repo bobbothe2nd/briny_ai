@@ -9,9 +9,13 @@
 //! always compile for correct uses - whether features are removed, added, etc., the
 //! abstraction is abstracted the same way every time.
 
-#[cfg(target_pointer_width = "64")]
+pub mod ops;
+pub mod tensors;
+// pub mod io;
+
+#[cfg(feature = "f64")]
 type TensorFloatInner = f64;
-#[cfg(not(target_pointer_width = "64"))]
+#[cfg(not(feature = "f64"))]
 type TensorFloatInner = f32;
 
 /// The float used in tensors.
@@ -28,8 +32,45 @@ pub const FLOAT_LANES: usize = if cfg!(target_pointer_width = "64") {
     lazy_simd::MAX_SIMD_SINGLE_PRECISION_LANES // equal to the above
 };
 
-pub mod ops;
-pub mod tensors;
+pub trait IntermediateFp {
+    fn into_f64(self) -> f64;
+    fn from_f64(val: f64) -> Self;
+    fn into_f32(self) -> f32;
+    fn from_f32(val: f32) -> Self;
+}
 
-#[allow(unused_imports, unused_variables, dead_code)]
-mod io;
+impl IntermediateFp for f32 {
+    fn from_f32(val: Self) -> Self {
+        val
+    }
+
+    fn from_f64(val: f64) -> Self {
+        val as Self
+    }
+
+    fn into_f32(self) -> Self {
+        self
+    }
+
+    fn into_f64(self) -> f64 {
+        f64::from(self)
+    }
+}
+
+impl IntermediateFp for f64 {
+    fn from_f32(val: f32) -> Self {
+        Self::from(val)
+    }
+
+    fn from_f64(val: Self) -> Self {
+        val
+    }
+
+    fn into_f32(self) -> f32 {
+        self as f32
+    }
+
+    fn into_f64(self) -> Self {
+        self
+    }
+}

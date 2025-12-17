@@ -1,17 +1,14 @@
-use crate::nn::io::{SerialTensorError, SerialTensorErrorKind, BPAT_MAGIC_V0};
+use crate::nn::IntermediateFp;
 use crate::nn::tensors::TensorGrad;
-use crate::nn::TensorFloat;
-#[cfg(feature = "alloc")]
-use alloc::{vec, vec::Vec};
-use briny::raw::{slice_to_bytes, to_bytes};
-#[cfg(feature = "std")]
-use std::fs::File;
-#[cfg(feature = "std")]
-use std::io::{BufReader, BufWriter, Read, Write};
+use crc32fast::Hasher;
 use tensor_optim::TensorOps;
+use briny::{raw::slice_to_bytes, traits::Pod};
+use crate::nn::io::{SerialTensorError, SerialTensorErrorKind, BPAT_MAGIC_V1};
+use alloc::{vec, vec::Vec};
+use std::{fs::File, io::{BufReader, BufWriter, Read, Write}};
 
 #[cfg(feature = "std")]
-pub fn save_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn save_tensors<T: TensorGrad<U> + TensorOps<U>, U: Pod + Copy + IntermediateFp>(
     path: &str,
     tensors: &[T],
 ) -> Result<(), SerialTensorError> {
@@ -29,7 +26,7 @@ pub fn save_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
         size
     };
     let mut buf = vec![0; len];
-    serialize_tensors(tensors, &mut buf);
+    serialize_tensors(tensors, &mut buf)?;
     file.write_all(&buf).map_err(|_| SerialTensorError {
         kind: SerialTensorErrorKind::InvalidPath,
         msg: "no such file exists",
@@ -38,7 +35,7 @@ pub fn save_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
 }
 
 #[cfg(feature = "std")]
-pub fn load_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn load_tensors<T: TensorGrad<U> + TensorOps<U>, U: Pod + Copy + IntermediateFp>(
     path: &str,
 ) -> Result<Vec<T>, SerialTensorError> {
     let mut file = BufReader::new(File::open(path).map_err(|_| SerialTensorError {
@@ -57,17 +54,17 @@ pub fn load_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
 }
 
 #[cfg(feature = "alloc")]
-pub fn serialize_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn serialize_tensors<T: TensorGrad<U> + TensorOps<U>, U: Pod + Copy + IntermediateFp>(
     tensors: &[T],
     buf: &mut [u8],
-) {
-    buf[0..4].copy_from_slice(&BPAT_MAGIC_V0);
-    buf[4] = tensors.len() as u8;
+) -> Result<(), SerialTensorError> {
+    buf[0..8].copy_from_slice(&BPAT_MAGIC_V1);
+    buf[8..16].copy_from_slice(&(tensors.len() as u64).to_le_bytes());
 
-    // tensor count
-    let count = buf[4] as usize;
+    let mut hasher = Hasher::new();
 
-    debug_assert_eq!(count, tensors.len());
+    hasher.update(&BPAT_MAGIC_V1);
+    hasher.update(&(tensors.len() as u64).to_le_bytes());
 
     // index into the buffer
     let mut idx = 5;
@@ -79,18 +76,22 @@ pub fn serialize_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
             "tensor shape/data mismatch"
         );
 
-        idx += serialize_tensor(t, &mut buf[idx..]);
+        idx += serialize_tensor(t, &mut buf[idx..])?;
     }
+
+    let file_crc = hasher.finalize();
+    buf[idx..idx+4].copy_from_slice(&file_crc.to_le_bytes());
+    Ok(())
 }
 
 #[cfg(feature = "alloc")]
-pub fn deserialize_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn deserialize_tensors<T: TensorGrad<U> + TensorOps<U>, U: Pod + Copy + IntermediateFp>(
     tensors: &mut [T],
     buf: &[u8],
 ) -> Result<(), SerialTensorError> {
     // magic header
-    let magic = &buf[0..4];
-    if magic != BPAT_MAGIC_V0 {
+    let magic = &buf[0..8];
+    if magic != BPAT_MAGIC_V1 {
         return Err(SerialTensorError {
             kind: SerialTensorErrorKind::InvalidHeader,
             msg: "invalid magic header",
@@ -113,44 +114,34 @@ pub fn deserialize_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
 }
 
 #[cfg(feature = "alloc")]
-pub fn serialize_tensor<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn serialize_tensor<T: TensorGrad<U> + TensorOps<U>, U: Pod + Copy + IntermediateFp>(
     tensor: &T,
     buf: &mut [u8],
-) -> usize {
-    let mut idx = 0;
+) -> Result<usize, SerialTensorError> {
+    let idx = 0;
 
-    let data = tensor
-        .data()
-        .iter()
-        .map(|&x| x as f64)
-        .collect::<Vec<f64>>();
-    let data = data.as_slice();
-    let shape = tensor
-        .shape()
-        .iter()
-        .map(|&x| x as u64)
-        .collect::<Vec<u64>>();
-    let shape = shape.as_slice();
+    let expected_len: usize = tensor.shape().iter().product();
+    if expected_len != tensor.data().len() {
+        return Err(SerialTensorError { kind: SerialTensorErrorKind::InvalidData, msg: "tensor shape/data length mismatch" });
+    }
 
-    let rank = shape.len() as u64;
-    let ndim = to_bytes(&rank);
-    buf[idx..idx + 8].copy_from_slice(ndim);
-    idx += 8;
+    buf[idx..idx+8].copy_from_slice(&(tensor.shape().len() as u64).to_le_bytes());
+    for &dim in tensor.shape() {
+        buf[idx..idx+8].copy_from_slice(&(dim as u64).to_le_bytes());
+    }
+    buf[idx..idx+size_of_val(tensor.data())].copy_from_slice(slice_to_bytes(tensor.data()));
 
-    let data_size = size_of_val(data);
-    let shape_size = size_of_val(shape);
-    let shape = slice_to_bytes(shape);
-    let data = slice_to_bytes(data);
-    buf[idx..idx + shape_size].copy_from_slice(shape);
-    idx += shape_size;
-    buf[idx..idx + data_size].copy_from_slice(data);
-    idx += data_size;
+    let mut crc = Hasher::new();
+    crc.update(&buf);
+    let tensor_crc = crc.finalize();
 
-    idx
+    buf.copy_from_slice(&tensor_crc.to_le_bytes());
+
+    Ok(idx)
 }
 
 #[cfg(feature = "alloc")]
-pub fn deserialize_tensor<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn deserialize_tensor<T: TensorGrad<U> + TensorOps<U>, U: Pod + Copy + IntermediateFp>(
     tensor: &mut T,
     buf: &[u8],
 ) -> Result<usize, SerialTensorError> {
@@ -184,10 +175,10 @@ pub fn deserialize_tensor<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
         idx += 8;
 
         data.push(
-            f64::from_le_bytes(buf8.try_into().map_err(|_| SerialTensorError {
+            U::from_f64(f64::from_le_bytes(buf8.try_into().map_err(|_| SerialTensorError {
                 kind: SerialTensorErrorKind::InvalidData,
                 msg: "tensor shape incorrect for data",
-            })?) as TensorFloat,
+            })?)),
         );
     }
 
@@ -220,7 +211,7 @@ mod tests {
 
         save_tensors("checkpoints/test/v0.bpat", &original).unwrap();
 
-        let loaded: Vec<VecTensor<TensorFloat>> = load_tensors("checkpoints/test/v0.bpat").unwrap();
+        let loaded: Vec<VecTensor<f32>> = load_tensors("checkpoints/test/v0.bpat").unwrap();
 
         assert_eq!(original, loaded.as_slice());
     }

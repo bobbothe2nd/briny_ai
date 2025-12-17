@@ -75,8 +75,8 @@ pub fn mse_loss<'a>(
 ///
 /// - Scalar loss `T`
 /// - Backward function mapping upstream scalar gradient `dL` to a tensor of shape `prediction`
-#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
 #[must_use]
+#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
 pub fn mse_loss<'a, const N: usize, const D: usize>(
     prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
     target: &'a Tensor<TensorFloat, N, D>,
@@ -129,14 +129,14 @@ pub fn mse_loss<'a, const N: usize, const D: usize>(
 ///
 /// - Scalar loss `T`
 /// - Backward function mapping upstream scalar gradient `dL` to a tensor of shape `prediction`
-#[cfg(not(feature = "alloc"))]
 #[must_use]
+#[cfg(not(feature = "alloc"))]
 pub fn mse_loss<'a, const N: usize, const D: usize>(
     prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
     target: &'a Tensor<TensorFloat, N, D>,
 ) -> (
     TensorFloat,
-    OpaqueFn<'a, TensorFloat, Tensor<TensorFloat, N, D>, Align8<64>>,
+    OpaqueFn<'a, TensorFloat, Tensor<TensorFloat, N, D>, Align8<128>>,
 ) {
     use tensor_optim::ConstTensorOps;
 

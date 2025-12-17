@@ -1,5 +1,9 @@
 [build]
 rustflags = [
   "-C", "llvm-args=--inline-threshold=1000",
+  "-C", "llvm-args=--unroll-threshold=1000",
+  "-C", "llvm-args=--enable-ppc-prefetching",
+  "-C", "llvm-args=--enable-loopinterchange",
+  "-C", "llvm-args=--enable-memcpy-dag-opt",
   "-C", "link-arg=-Wl,-O1",
 ]

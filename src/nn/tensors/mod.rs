@@ -1,6 +1,7 @@
 //! Flexible tensor backends based on features and targets.
 
 mod optim;
+
 #[cfg(feature = "alloc")]
 mod vec;
 

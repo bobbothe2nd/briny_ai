@@ -22,7 +22,7 @@ pub mod test;
 pub type BackFn<'a, In, Out> = Box<dyn Fn(In) -> Out + 'a>;
 /// A backwards closure that conditionally uses allocation if available.
 #[cfg(not(feature = "alloc"))]
-pub type BackFn<'a, In, Out> = OpaqueFn<'a, In, Out, Align8<64>>;
+pub type BackFn<'a, In, Out> = OpaqueFn<'a, In, Out, Align8<128>>;
 
 #[cfg(not(feature = "dyntensor"))]
 type Tensor<const D: usize, const N: usize> = crate::nn::tensors::Tensor<TensorFloat, N, D>;
@@ -51,6 +51,8 @@ pub enum ActivationKind {
     ReLU,
     /// Dispatches to a Sigmoid activation function.
     Sigmoid,
+    /// Dispatches to a Softmax activation function.
+    Softmax,
 }
 
 /// Type that dispatches to a `ReLU` acitvation.
@@ -68,6 +70,15 @@ pub struct Sigmoid;
 impl ActivationFn for Sigmoid {
     fn kind() -> ActivationKind {
         ActivationKind::Sigmoid
+    }
+}
+
+/// Type that dispatches to a `ReLU` acitvation.
+pub struct Softmax;
+
+impl ActivationFn for Softmax {
+    fn kind() -> ActivationKind {
+        ActivationKind::Softmax
     }
 }
 
@@ -107,6 +118,7 @@ impl ActivationFn for Sigmoid {
 /// ```rust
 /// briny_ai::static_model!(
 ///     @loss mse_loss
+///     @optim sgd
 ///     @model XorModel
 ///     {
 ///         InputLayer([4, 2]),
@@ -127,6 +139,7 @@ impl ActivationFn for Sigmoid {
 macro_rules! static_model {
     (
         @loss $loss:ident
+        @optim $optim:ident $(($lr:expr))?
         @model $name:ident
         {
             InputLayer([$($in_RANK:expr),+]),
@@ -136,7 +149,7 @@ macro_rules! static_model {
     ) => {
         pub struct $name {
             $(
-                $field: $crate::internal::$full_layer<
+                $field: $crate::macros::$full_layer<
                     { <[()]>::len(&[$( { let _ = &$RANK; () } ),+]) },
                     { 1 $(* $RANK)* },
                 >,
@@ -152,41 +165,44 @@ macro_rules! static_model {
             const OUT_RANK: usize = [$($out_RANK),*].len();
             const OUT_SIZE: usize = { 1 $(* $out_RANK)* };
 
-            const SERIALIZED_TENSOR_CAPACITY_NO_CHECKSUMS: usize = { (0 $(+ (1 $(* $RANK)*))* * ::core::mem::size_of::<f64>()) + (0 $(+ ([$($RANK),*].len()))* * ::core::mem::size_of::<u64>()) };
-            const SERIALIZED_TENSOR_CAPACITY_WITH_CHECKSUMS: usize = { Self::SERIALIZED_TENSOR_CAPACITY_NO_CHECKSUMS + ((0 $(+ {let _ = [$($RANK),*]; 1})*) * ::core::mem::size_of::<u32>()) + ::core::mem::size_of::<u32>() };
+            #[allow(unused_variables)]
+            const TENSOR_COUNT: usize = [$({let $field = ();}),*].len();
+
+            const SERIALIZED_TENSOR_CAPACITY_BPATV0: usize = { (0 $(+ (1 $(* $RANK)*))* * ::core::mem::size_of::<f32>()) + (0 $(+ ([$($RANK),*].len()))* * ::core::mem::size_of::<u64>()) };
+            const SERIALIZED_TENSOR_CAPACITY_BPATV1: usize = { Self::SERIALIZED_TENSOR_CAPACITY_BPATV0 + ((0 $(+ {let _ = [$($RANK),*]; 1})*) * ::core::mem::size_of::<u32>()) + ::core::mem::size_of::<u32>() };
 
             pub fn new() -> Self {
-                pub struct Builder {
+                struct Builder {
                     $(
-                        $field: $crate::internal::$layer<
+                        $field: $crate::macros::$layer<
                             { <[()]>::len(&[$( { let _ = &$RANK; () } ),+]) },
                             { 1 $(* $RANK)* }
-                            $(, $crate::internal::$activation)?,
+                            $(, $crate::macros::$activation)?,
                         >,
                     )*
                 }
 
                 impl Builder {
-                    pub fn new() -> Self {
+                    fn new() -> Self {
                         Self {
                             $(
-                                $field: $crate::internal::$layer {
+                                $field: $crate::macros::$layer {
                                     shape: [$($RANK),+],
                                     data: ::core::array::from_fn(|i| (i as $crate::nn::TensorFloat * 1e-2).sin()),
-                                    $( _activation: ::core::marker::PhantomData::<$crate::internal::$activation>, )?
+                                    $( _activation: ::core::marker::PhantomData::<$crate::macros::$activation>, )?
                                 },
                             )*
                         }
                     }
 
-                    pub fn build(self) -> $name {
+                    fn build(self) -> $name {
                         $name {
                             $(
                                 $field: self.$field.build(),
                             )*
 
-                            lr: 0.001,
-                        }
+                            lr: 0.01,
+                        }$(.with_lr($lr))?
                     }
                 }
 
@@ -202,22 +218,22 @@ macro_rules! static_model {
             }
 
             #[allow(clippy::unnecessary_casts)]
-            pub const fn set_lr(&mut self, lr: f64) {
+            pub const fn set_lr(&mut self, lr: f32) {
                 self.lr = lr as $crate::nn::TensorFloat;
             }
 
-            pub const fn with_lr(self, lr: f64) -> Self {
+            pub const fn with_lr(self, lr: f32) -> Self {
                 let mut copied = self;
                 copied.set_lr(lr);
                 copied
             }
 
             #[allow(clippy::unnecessary_casts)]
-            pub const fn get_lr(&self) -> f64 {
-                self.lr as f64
+            pub const fn get_lr(&self) -> f32 {
+                self.lr as f32
             }
 
-            pub fn train_fit_epoch(
+            pub fn fit_epoch(
                 &mut self,
                 dataset: &$crate::Dataset<
                     { Self::IN_RANK },
@@ -225,7 +241,7 @@ macro_rules! static_model {
                     { Self::OUT_RANK },
                     { Self::OUT_SIZE },
                 >
-            ) -> f64 {
+            ) -> f32 {
                 // forward pass (fast)
                 let input = dataset.inputs();
                 let out = ::core::clone::Clone::clone(input.get_value());
@@ -241,23 +257,23 @@ macro_rules! static_model {
                 let (loss, back_loss) = $crate::nn::ops::dispatch::$loss(&output, dataset.targets());
 
                 // backward pass (unrolled)
-                let grad_output = $crate::internal::Closure::invoke(&back_loss, loss);
+                let grad_output = $crate::macros::Closure::invoke(&back_loss, loss);
 
                 // hidden layers backward (reversed order)
                 $crate::static_model!(@rev $($field),+; grad_output self);
 
                 // apply optimizer to non-IO layers
                 $(
-                    $crate::internal::Layer::apply_update(
+                    $crate::macros::Layer::apply_update(
                         &mut self.$field,
                         self.lr,
-                        $crate::nn::ops::dispatch::sgd
+                        $crate::nn::ops::dispatch::$optim,
                     );
                 )*
 
                 #[allow(clippy::unnecessary_casts)]
                 {
-                    loss as f64
+                    loss as f32
                 }
             }
 
@@ -270,40 +286,52 @@ macro_rules! static_model {
                     { Self::OUT_SIZE },
                 >,
                 epochs: usize,
-            ) -> f64 {
-                let mut max_lr = 0.2_f64;
-                let mut min_lr = 1e-3_f64;
-                let mut loss = 0_f64;
+            ) -> f32 {
+                let mut max_lr = 0.2;
+                let mut min_lr = 1e-3;
+                let mut loss = 0_f32;
+                let mut prev = 0_f32;
+                let mut panic = false;
                 for i in 0..epochs {
-                    let prev = loss;
-                    loss = self.train_fit_epoch(dataset);
+                    if !panic {
+                        prev = loss;
+                    }
 
-                    // optimize lr to bring forth lower loss
-                    if ((loss - prev).abs() + $crate::approx::F64_MIN_ERROR) < (self.lr as f64) {
-                        if self.lr < min_lr {
-                            self.lr *= 2.0;
-                        } else {
-                            self.lr /= 1.03;   // small reduction to ensure learning rate is reasonable
-                        }
-                    } else if self.lr < max_lr {
-                        self.lr *= 1.01;
-                        if self.lr > min_lr {
-                            self.lr *= 1.01;   // excessive increment to balance out low lr
-                        } else if min_lr < max_lr {
-                            max_lr /= 1.01;
-                        } else {
-                            min_lr /= 1.03;
-                        }
+                    loss = self.fit_epoch(dataset);
+
+                    if prev > loss {
+                        // panic because of greater loss
+                        panic = true;
+                    } else if panic {
+                        panic = false;
                     } else {
-                        max_lr *= 2.0;
-                        min_lr /= 2.0;
-                        self.lr *= 1.01;
+                        // optimize lr to bring forth lower loss
+                        if ((loss - prev).abs() + $crate::approx::F32_MIN_ERROR) < (self.lr as f32) {
+                            if self.lr < min_lr {
+                                self.lr *= 2.0;
+                            } else {
+                                self.lr /= 1.03;   // small reduction to ensure learning rate is reasonable
+                            }
+                        } else if self.lr < max_lr {
+                            self.lr *= 1.01;
+                            if self.lr > min_lr {
+                                self.lr *= 1.01;   // excessive increment to balance out low lr
+                            } else if min_lr < max_lr {
+                                max_lr /= 1.01;
+                            } else {
+                                min_lr /= 1.03;
+                            }
+                        } else {
+                            max_lr *= 2.0;
+                            min_lr /= 2.0;
+                            self.lr *= 1.01;
+                        }
                     }
                 }
                 loss // return the most recent loss
             }
 
-            pub fn test_epoch(
+            pub fn forward(
                 &self,
                 dataset: &$crate::Dataset<
                     { Self::IN_RANK },
@@ -311,7 +339,34 @@ macro_rules! static_model {
                     { Self::OUT_RANK },
                     { Self::OUT_SIZE },
                 >,
-            ) -> $crate::internal::TestEval {
+            ) -> [f32; Self::OUT_SIZE] {
+                // forward pass (fast)
+                let input = dataset.inputs();
+                let out = ::core::clone::Clone::clone(input.get_value());
+
+                // shadowing for each hidden layer
+                $(
+                    let input = $crate::nn::tensors::IntoWithGrad::with_grad(out);
+                    let (out, _) = self.$field.forward(&input);
+                )*
+
+                let mut buf = [0_f32; Self::OUT_SIZE];
+                #[allow(clippy::unnecessary_casts)]
+                for (i, v) in $crate::nn::tensors::TensorOps::data(&out).iter().map(|&x| x as f32).enumerate() {
+                    buf[i] = v;
+                }
+                buf
+            }
+
+            pub fn infer(
+                &self,
+                dataset: &$crate::Dataset<
+                    { Self::IN_RANK },
+                    { Self::IN_SIZE },
+                    { Self::OUT_RANK },
+                    { Self::OUT_SIZE },
+                >,
+            ) -> $crate::macros::TestEval {
                 // forward pass (fast)
                 let input = dataset.inputs();
                 let out = ::core::clone::Clone::clone(input.get_value());
@@ -325,53 +380,29 @@ macro_rules! static_model {
                 // compute loss
                 let output = $crate::nn::tensors::IntoWithGrad::with_grad(out);
                 let (loss, _) = $crate::nn::ops::dispatch::$loss(&output, dataset.targets());
-                let score = $crate::internal::test::percentage_correct(output.get_value(), dataset.targets());
-                let accuracy = $crate::internal::test::accuracy_of(output.get_value(), dataset.targets());
+                let score = $crate::macros::test::percentage_correct(output.get_value(), dataset.targets());
+                let accuracy = $crate::macros::test::accuracy_of(output.get_value(), dataset.targets());
 
                 #[allow(clippy::unnecessary_casts)]
-                $crate::internal::TestEval {
-                    loss: loss as f64,
+                $crate::macros::TestEval {
+                    loss: loss as f32,
                     score,
                     accuracy,
                 }
-            }
-
-            pub fn test(
-                &self,
-                dataset: &$crate::Dataset<
-                    { Self::IN_RANK },
-                    { Self::IN_SIZE },
-                    { Self::OUT_RANK },
-                    { Self::OUT_SIZE },
-                >,
-                epochs: usize,
-            ) -> $crate::internal::TestEval {
-                let mut eval = $crate::internal::TestEval {
-                    loss: 0.0,
-                    score: 0.0,
-                    accuracy: 0.0,
-                };
-
-                for i in 0..epochs {
-                    let update = self.test_epoch(dataset);
-                    eval.set_if_better(&update);
-                }
-
-                eval
             }
 
             // pub fn save(
             //     &self,
             //     path: &str,
             // ) -> ::core::result::Result<(), $crate::nn::io::SerialTensorError> {
-            //     ::core::result::Result::Ok(())
+            //     $crate::nn::io::save_tensors(path)
             // }
 
             // pub fn load(
             //     &mut self,
             //     path: &str,
             // ) -> ::core::result::Result<(), $crate::nn::io::SerialTensorError> {
-            //     ::core::result::Result::Ok(())
+            //     $crate::nn::io::load_tensors(path)
             // }
         }
     };
@@ -379,9 +410,11 @@ macro_rules! static_model {
     (@rev [ $single:ident ] $grad:ident $s:ident) => {
         let ($grad, accum) = $s.$single.backward($grad, $single);
         if let ::core::option::Option::Some(grad_w) = accum {
-            // accumulate gradients
-            for (g, val) in ::core::iter::Iterator::zip($crate::nn::tensors::TensorOps::data_mut($crate::internal::Layer::weights_mut(&mut $s.$single).get_grad_mut()).iter_mut(), $crate::nn::tensors::TensorOps::data(&grad_w)) {
-                *g += val;
+            if let ::core::option::Option::Some(w) = $crate::macros::Layer::weights_mut(&mut $s.$single) {
+                // accumulate gradients
+                for (g, val) in ::core::iter::Iterator::zip($crate::nn::tensors::TensorOps::data_mut(w.get_grad_mut()).iter_mut(), $crate::nn::tensors::TensorOps::data(&grad_w)) {
+                    *g += val;
+                }
             }
         }
     };
@@ -390,9 +423,11 @@ macro_rules! static_model {
         $crate::static_model!(@rev [ $( $rest ),+ ] $grad $s);
         let ($grad, accum) = $s.$first.backward($grad, $first);
         if let ::core::option::Option::Some(grad_w) = accum {
-            // accumulate gradients
-            for (g, val) in ::core::iter::Iterator::zip($crate::nn::tensors::TensorOps::data_mut($crate::internal::Layer::weights_mut(&mut $s.$first).get_grad_mut()).iter_mut(), $crate::nn::tensors::TensorOps::data(&grad_w)) {
-                *g += val;
+            if let ::core::option::Option::Some(w) = $crate::macros::Layer::weights_mut(&mut $s.$first) {
+                // accumulate gradients
+                for (g, val) in ::core::iter::Iterator::zip($crate::nn::tensors::TensorOps::data_mut(w.get_grad_mut()).iter_mut(), $crate::nn::tensors::TensorOps::data(&grad_w)) {
+                    *g += val;
+                }
             }
         }
     };
@@ -403,22 +438,25 @@ macro_rules! static_model {
 }
 
 /// A structure containing all the information obtained from a test.
+///
+/// Score predicts the potential of the model, accuracy approximates the correctness of the model, and
+/// loss is tuned per-model based off what operation it performs (MSE, cross entropy, etc.).
 #[derive(Debug, Clone, Copy)]
 pub struct TestEval {
     /// The loss earned by a model from it's chosen function. {#}
-    pub loss: f64,
+    pub loss: f32,
 
     /// The precise accuracy (with very small epsilon). {%}
     ///
     /// It should be expected that this is always very low, if
     /// it even rises from 0%.
-    pub accuracy: f64,
+    pub accuracy: f32,
 
     /// The imaginary "score" of a model. {%}
     ///
     /// Like accuracy, but with a dynamic epsilon that gives
     /// lower scores for higher error.
-    pub score: f64,
+    pub score: f32,
 }
 
 impl TestEval {
@@ -453,15 +491,22 @@ pub struct Dataset<
     const OUT_RANK: usize,
     const OUT_SIZE: usize,
 > {
+    #[cfg(feature = "alloc")]
+    inputs: Box<WithGrad<Tensor<IN_RANK, IN_SIZE>>>,
+    #[cfg(feature = "alloc")]
+    targets: Box<Tensor<OUT_RANK, OUT_SIZE>>,
+
+    #[cfg(not(feature = "alloc"))]
     inputs: WithGrad<Tensor<IN_RANK, IN_SIZE>>,
+    #[cfg(not(feature = "alloc"))]
     targets: Tensor<OUT_RANK, OUT_SIZE>,
 }
 
 impl<const IR: usize, const IS: usize, const OR: usize, const OS: usize> Dataset<IR, IS, OR, OS> {
     /// Construct a new dataset by flattenning nested arrays.
     pub fn new<
-        F1: Flatten<IS, Flattened = [f64; IS]> + StaticShape<IR>,
-        F2: Flatten<OS, Flattened = [f64; OS]> + StaticShape<OR>,
+        F1: Flatten<IS, Flattened = [f32; IS]> + StaticShape<IR>,
+        F2: Flatten<OS, Flattened = [f32; OS]> + StaticShape<OR>,
     >(
         inputs: &F1,
         targets: &F2,
@@ -479,19 +524,37 @@ impl<const IR: usize, const IS: usize, const OR: usize, const OS: usize> Dataset
     #[allow(clippy::unnecessary_cast)]
     pub fn from_parts(
         inputs_shape: [usize; IR],
-        inputs_data: [f64; IS],
+        inputs_data: [f32; IS],
         targets_shape: [usize; OR],
-        targets_data: [f64; OS],
+        targets_data: [f32; OS],
     ) -> Self {
         // fill inputs
-        let inputs_iter = inputs_data.into_iter().map(|val| val as TensorFloat);
+        let inputs_iter = {
+            #[cfg(feature = "f64")]
+            {
+                inputs_data.into_iter().map(TensorFloat::from)
+            }
+            #[cfg(not(feature = "f64"))]
+            {
+                inputs_data.into_iter()
+            }
+        };
         let mut inputs_data = [0.0; IS];
         for (i, val) in inputs_iter.enumerate() {
             inputs_data[i] = val;
         }
 
         // fill targets
-        let targets_iter = targets_data.into_iter().map(|val| val as TensorFloat);
+        let targets_iter = {
+            #[cfg(feature = "f64")]
+            {
+                targets_data.into_iter().map(TensorFloat::from)
+            }
+            #[cfg(not(feature = "f64"))]
+            {
+                targets_data.into_iter()
+            }
+        };
         let mut targets_data = [0.0; OS];
         for (i, val) in targets_iter.enumerate() {
             targets_data[i] = val;
@@ -500,9 +563,20 @@ impl<const IR: usize, const IS: usize, const OR: usize, const OS: usize> Dataset
         let inputs_tensor = Tensor::<IR, IS>::new(&inputs_shape, &inputs_data);
         let targets_tensor = Tensor::<OR, OS>::new(&targets_shape, &targets_data);
 
-        Self {
-            inputs: inputs_tensor.with_grad(),
-            targets: targets_tensor,
+        #[cfg(feature = "alloc")]
+        {
+            Self {
+                inputs: Box::new(inputs_tensor.with_grad()),
+                targets: Box::new(targets_tensor),
+            }
+        }
+
+        #[cfg(not(feature = "alloc"))]
+        {
+            Self {
+                inputs: inputs_tensor.with_grad(),
+                targets: targets_tensor,
+            }
         }
     }
 

@@ -288,26 +288,26 @@ fn main() {
         }
     }
 
-    #[cfg(feature = "std")]
-    {
-        use briny_ai::nn::{io::BpatHeader, tensors::TensorGrad};
-        briny_ai::nn::io::save_tensors(
-            "checkpoints/m-xor/model.bpat",
-            &[w1.get_value().clone(), w2.get_value().clone()],
-            BpatHeader::BpatV1,
-        )
-        .unwrap();
-        println!("Model saved to checkpoints/m-xor/model.bpat");
-
-        let loaded =
-            briny_ai::nn::io::load_tensors::<TensorFloat>("checkpoints/m-xor/model.bpat").unwrap();
-        println!("Loaded tensors:");
-        for t in loaded {
-            println!(
-                "Shape: {:?}, First few vals: {:?}",
-                t.shape(),
-                &t.data()[..4.min(t.len())],
-            );
-        }
-    }
+    // #[cfg(feature = "std")]
+    // {
+    //     use briny_ai::nn::{io::BpatHeader, tensors::TensorGrad};
+    //     briny_ai::nn::io::save_tensors(
+    //         "checkpoints/m-xor/model.bpat",
+    //         &[w1.get_value().clone(), w2.get_value().clone()],
+    //         BpatHeader::BpatV1,
+    //     )
+    //     .unwrap();
+    //     println!("Model saved to checkpoints/m-xor/model.bpat");
+    //
+    //     let loaded =
+    //         briny_ai::nn::io::load_tensors::<TensorFloat>("checkpoints/m-xor/model.bpat").unwrap();
+    //     println!("Loaded tensors:");
+    //     for t in loaded {
+    //         println!(
+    //             "Shape: {:?}, First few vals: {:?}",
+    //             t.shape(),
+    //             &t.data()[..4.min(t.len())],
+    //         );
+    //     }
+    // }
 }

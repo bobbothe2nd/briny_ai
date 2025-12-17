@@ -168,7 +168,7 @@ pub fn matmul<'a, const A: usize, const B: usize, const OUT: usize, const D: usi
         'a,
         Tensor<TensorFloat, OUT, D>,
         (Tensor<TensorFloat, A, D>, Tensor<TensorFloat, B, D>),
-        Align8<64>,
+        Align8<128>,
     >,
 ) {
     let a_val = a.get_value();

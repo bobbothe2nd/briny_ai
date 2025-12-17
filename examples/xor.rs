@@ -2,6 +2,7 @@ use briny_ai::prelude::{set_backend, static_model, Backend, Dataset};
 
 static_model!(
     @loss mse_loss
+    @optim sgd
     @model XorModel
     {
         InputLayer([4, 2]),
@@ -46,7 +47,7 @@ fn main() {
         );
 
         if i.is_multiple_of(10) {
-            let eval = model.test(&dataset, 5);
+            let eval = model.infer(&dataset);
 
             score = eval.score;
 

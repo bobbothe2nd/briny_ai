@@ -1,6 +1,6 @@
 [package]
 name = "briny_ai"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.83.0"
 description = "A tiny & efficient AI inference engine"
@@ -15,12 +15,40 @@ readme = "README.md"
 opt-level = 3
 codegen-units = 1
 incremental = true
+debug = false
 
 [profile.release.package."*"]
 opt-level = 3
 codegen-units = 1
 
+[[example]]
+name = "m-mnist"
+required-features = [
+    "std", "dyntensor",
+]
+
+[[example]]
+name = "m-xor"
+required-features = []
+
+[[example]]
+name = "xor"
+required-features = []
+
+[[example]]
+name = "char_rnn"
+required-features = []
+
+[[test]]
+name = "core"
+required-features = []
+
 [features]
+default = ["alloc"]
+
+# float type used
+f64 = [] # probably shouldn't use without alloc (closure size)
+
 # abstraction levels
 alloc = ["tensor_optim/alloc", "lazy_simd/alloc"] # no OS, but global allocator
 std = ["alloc", "lazy_simd/std", "dep:crc32fast"] # underlying OS exists
@@ -40,6 +68,7 @@ box_closure = "0.1.0"
 tensor_optim =  "0.2.1"
 crc32fast = { version = "1.5.0", default-features = false, optional = true }
 lazy_static = { version = "1.5.0", default-features = false, optional = true }
+libm = "0.2.15"
 
 # Windows
 [target.'cfg(target_family = "windows")'.dependencies.wgpu]

@@ -27,6 +27,43 @@ use crate::nn::TensorFloat;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 
+/// Performs the cross entropy loss function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", feature = "dyntensor"))]
+pub fn cross_entropy_loss<'a>(
+    prediction: &'a WithGrad<Tensor<TensorFloat>>,
+    target: &'a Tensor<TensorFloat>,
+) -> (
+    TensorFloat,
+    Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat> + 'a>,
+) {
+    super::cpu::cross_entropy_loss(prediction, target)
+}
+/// Performs the cross entropy loss function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
+pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
+    prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
+    target: &'a Tensor<TensorFloat, N, D>,
+) -> (
+    TensorFloat,
+    Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat, N, D> + 'a>,
+) {
+    super::cpu::cross_entropy_loss(prediction, target)
+}
+/// Performs the cross entropy loss function, dispatching it among different backends.
+#[must_use]
+#[cfg(not(feature = "alloc"))]
+pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
+    prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
+    target: &'a Tensor<TensorFloat, N, D>,
+) -> (
+    TensorFloat,
+    OpaqueFn<'a, TensorFloat, Tensor<TensorFloat, N, D>, Align8<128>>,
+) {
+    super::cpu::cross_entropy_loss(prediction, target)
+}
+
 /// Performs matrix multiplication, dispatching it among different backends.
 #[must_use]
 #[cfg(feature = "dyntensor")]
@@ -109,7 +146,7 @@ pub fn matmul<'a, const A: usize, const B: usize, const OUT: usize, const D: usi
         'a,
         Tensor<TensorFloat, OUT, D>,
         (Tensor<TensorFloat, A, D>, Tensor<TensorFloat, B, D>),
-        Align8<64>,
+        Align8<128>,
     >,
 ) {
     super::cpu::matmul(a, b)
@@ -187,7 +224,7 @@ pub fn mse_loss<'a, const N: usize, const D: usize>(
     target: &'a Tensor<TensorFloat, N, D>,
 ) -> (
     TensorFloat,
-    OpaqueFn<'a, TensorFloat, Tensor<TensorFloat, N, D>, Align8<64>>,
+    OpaqueFn<'a, TensorFloat, Tensor<TensorFloat, N, D>, Align8<128>>,
 ) {
     super::cpu::mse_loss(prediction, target)
 }
@@ -323,7 +360,41 @@ pub fn relu<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<64>>,
+    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
 ) {
     super::cpu::relu(input)
+}
+
+/// Performs the softmax activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", feature = "dyntensor"))]
+pub fn softmax(
+    input: &WithGrad<Tensor<TensorFloat>>,
+) -> (
+    Tensor<TensorFloat>,
+    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+) {
+    super::cpu::softmax(input)
+}
+/// Performs the softmax activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
+pub fn softmax<const N: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+) -> (
+    Tensor<TensorFloat, N, D>,
+    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+) {
+    super::cpu::softmax(input)
+}
+/// Performs the softmax activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(not(feature = "alloc"))]
+pub fn softmax<const N: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+) -> (
+    Tensor<TensorFloat, N, D>,
+    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+) {
+    super::cpu::softmax(input)
 }

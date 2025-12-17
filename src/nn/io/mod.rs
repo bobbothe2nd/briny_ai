@@ -45,6 +45,8 @@
 //! - Maximum 255 tensors per file (due to `u8` count limit)
 //! - No per-tensor metadata (names, dtypes, etc.)
 
+#[cfg(feature = "std")]
+use crate::nn::IntermediateFp;
 use crate::nn::tensors::TensorGrad;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -53,7 +55,7 @@ use briny::{
     traits::Pod,
 };
 #[cfg(feature = "std")]
-use crc32fast::Hasher as Crc32;
+use Hasherfast::Hasher;
 #[cfg(feature = "std")]
 use std::fs::File;
 #[cfg(feature = "std")]
@@ -130,9 +132,19 @@ pub enum BpatHeader {
 
     /// A format that guarantees data integrity.
     BpatV1,
+}
 
-    /// It doesn't require dynamic allocation.
-    BpatV1Micro,
+impl Default for BpatHeader {
+    fn default() -> Self {
+        #[cfg(feature = "std")]
+        {
+            BpatHeader::BpatV1
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            BpatHeader::BpatV0
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -150,67 +162,50 @@ pub enum SerialTensorErrorKind {
 }
 
 /// Saves the given tensors to a file.
-///
-/// # Errors
-///
-/// When tensors don't seem correct, `std::io::Error` is returned with type of `InvalidData`. If writing to the file failed, a similar error is returned.
 #[cfg(feature = "std")]
-pub fn save_tensors<T: TensorGrad<U> + TensorOps<U>, U: Pod>(
+pub fn save_tensors<T: TensorGrad<U> + TensorOps<U>, U: Pod + Copy + IntermediateFp>(
     path: &str,
     tensors: &[T],
     header: BpatHeader,
-) -> Result<(), io::Error> {
-    let mut file = BufWriter::new(File::create(path)?);
-    let mut hasher = Crc32::new();
-
-    file.write_all(&BPAT_MAGIC_V1)?;
-    file.write_all(&(tensors.len() as u64).to_le_bytes())?;
-    hasher.update(&BPAT_MAGIC_V1);
-    hasher.update(&(tensors.len() as u64).to_le_bytes());
-
-    for tensor in tensors {
-        let expected_len: usize = tensor.shape().iter().product();
-        if expected_len != tensor.data().len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "tensor shape/data mismatch",
-            ));
+) -> Result<(), SerialTensorError> {
+    match header {
+        BpatHeader::BpatV0 => {
+            versions::v0::save_tensors(path, tensors)
         }
-
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&(tensor.shape().len() as u64).to_le_bytes());
-        for &dim in tensor.shape() {
-            buf.extend_from_slice(&(dim as u64).to_le_bytes());
+        BpatHeader::BpatV1 => {
+            versions::v1::save_tensors(path, tensors)
         }
-        buf.extend_from_slice(slice_to_bytes(tensor.data()));
-
-        let mut crc = Crc32::new();
-        crc.update(&buf);
-        let tensor_crc = crc.finalize();
-
-        file.write_all(&buf)?;
-        file.write_all(&tensor_crc.to_le_bytes())?;
-
-        hasher.update(&buf);
-        hasher.update(&tensor_crc.to_le_bytes());
     }
-
-    let file_crc = hasher.finalize();
-    file.write_all(&file_crc.to_le_bytes())?;
-    Ok(())
 }
 
 /// Loads tensors from a file.
-///
-/// # Errors
-///
-/// With most errors, like an invalid header or corrupted checksum, `std::io::Error` is returned - usually `InvalidData`, sometimes `UnexpectedEof`.
-///
-/// # Panics
-///
-/// When types cannot be properly coerced, the function will forcefully panic unexpectedly.
 #[cfg(feature = "std")]
-pub fn load_tensors<T: Pod + Clone + Default>(path: &str) -> Result<Vec<VecTensor<T>>, io::Error> {
+pub fn load_tensors<T: Copy + Pod + IntermediateFp>(path: &str) -> Result<Vec<VecTensor<T>>, SerialTensorError> {
+    let mut file = BufReader::new(File::open(path)?);
+    let file_start = [0; 8];
+    file.read_exact(&mut file_start).map_err(|_| SerialTensorError {
+        kind: SerialTensorErrorKind::InvalidHeader,
+        msg: "header not found",
+    })?;
+    let header = if file_start == BPAT_MAGIC_V1 {
+        BpatHeader::BpatV1
+    } else if file_start.starts_with(&BPAT_MAGIC_V0) {
+        BpatHeader::BpatV0
+    } else {
+        return Err(SerialTensorError {
+            kind: SerialTensorErrorKind::InvalidHeader,
+            msg: "invalid header",
+        });
+    };
+    return match header {
+        BpatHeader::BpatV0 => {
+            versions::v0::load_tensors(path)
+        }
+        BpatHeader::BpatV1 => {
+            versions::v1::load_tensors(path)
+        }
+    };
+
     let mut file = BufReader::new(File::open(path)?);
     let mut full_data = Vec::new();
     file.read_to_end(&mut full_data)?;
@@ -226,7 +221,7 @@ pub fn load_tensors<T: Pod + Clone + Default>(path: &str) -> Result<Vec<VecTenso
     let (data, crc_bytes) = full_data.split_at(full_data.len() - 4);
     let expected_crc = u32::from_le_bytes(crc_bytes.try_into().unwrap());
 
-    let mut hasher = Crc32::new();
+    let mut hasher = Hasher::new();
     hasher.update(data);
     if hasher.finalize() != expected_crc {
         return Err(io::Error::new(
@@ -323,7 +318,7 @@ pub fn load_tensors<T: Pod + Clone + Default>(path: &str) -> Result<Vec<VecTenso
         offset += 4;
 
         let tensor_bytes = &data[tensor_start..offset - 4];
-        let mut crc = Crc32::new();
+        let mut crc = Hasher::new();
         crc.update(tensor_bytes);
         let actual_crc = crc.finalize();
 

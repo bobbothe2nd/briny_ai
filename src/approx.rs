@@ -6,7 +6,7 @@
 pub const F32_MAX_ERROR: f32 = 1e-3;
 
 /// The expected minimum epsilon accepted on `f32`s.
-pub const F32_AVG_ERROR: f32 = 1e-4;
+pub const F32_AVG_ERROR: f32 = 1e-5;
 
 /// The best expected epsilon accepted on `f32`s.
 pub const F32_MIN_ERROR: f32 = 1e-6;

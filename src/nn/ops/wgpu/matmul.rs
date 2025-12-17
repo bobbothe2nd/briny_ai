@@ -179,8 +179,16 @@ pub fn wgpu_matmul(
     )
     .ok()?;
 
-    let output_data_float: Vec<TensorFloat> =
-        output_data.into_iter().map(TensorFloat::from).collect();
+    let output_data_float: Vec<TensorFloat> = {
+        #[cfg(feature = "f64")]
+        {
+            output_data.into_iter().map(TensorFloat::from)
+        }
+        #[cfg(not(feature = "f64"))]
+        {
+            output_data.into_iter()
+        }
+    }.collect();
     let out_tensor = Tensor::new(&out_shape, &output_data_float);
 
     let a_val = a.get_value().clone();
@@ -375,8 +383,16 @@ pub fn wgpu_matmul<'a, const A: usize, const B: usize, const OUT: usize, const D
     )
     .ok()?;
 
-    let output_data_float: Vec<TensorFloat> =
-        output_data.into_iter().map(TensorFloat::from).collect();
+    let output_data_float: Vec<TensorFloat> = {
+            #[cfg(feature = "f64")]
+            {
+                output_data.into_iter().map(TensorFloat::from)
+            }
+            #[cfg(not(feature = "f64"))]
+            {
+                output_data.into_iter()
+            }
+        }.collect();
     let out_tensor = Tensor::new(
         &array_from_slice(&out_shape),
         &array_from_slice(&output_data_float),

@@ -2,8 +2,8 @@
 //!
 //! This crate provides a fast, minimal, and modular deep learning backend
 //! built in Rust. It features basic tensor operations, automatic differentiation,
-//! and support for CPU acceleration via Rayon and AVX2 SIMD. GPU support via WGPU
-//! is optional and designed for portability across Intel, AMD, and NVIDIA hardware.
+//! and support for CPU acceleration via Lazy SIMD. GPU support via WGPU is optional
+//! and designed for portability across Intel, AMD, and NVIDIA hardware.
 //!
 //! ## Features
 //!
@@ -27,7 +27,7 @@
 )]
 #![forbid(unsafe_op_in_unsafe_fn)]
 #![forbid(clippy::nursery, unused_must_use)]
-#![forbid(missing_docs)]
+// #![forbid(missing_docs)]
 #![no_std]
 
 #[cfg(feature = "alloc")]
@@ -36,7 +36,7 @@ extern crate alloc;
 extern crate std;
 
 // not meant to be acccessed outside the macro
-pub mod internal;
+pub mod macros;
 
 pub mod approx;
 pub mod backend;
@@ -44,7 +44,7 @@ pub mod nn;
 
 // re-exports to avoid importing through internals
 // these are needed for the macro to function properly
-pub use internal::{Dataset, TestEval};
+pub use macros::{Dataset, TestEval};
 
 pub mod prelude {
     //! Common re-exports at a central location.

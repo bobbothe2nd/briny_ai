@@ -3,6 +3,7 @@ use super::{
     TensorFloat, WithGrad,
 };
 
+use crate::nn::ops::dispatch::softmax;
 #[cfg(feature = "dyntensor")]
 use crate::nn::tensors::TensorOps;
 
@@ -16,27 +17,33 @@ pub trait Layer<const RANK: usize, const IN_SIZE: usize> {
     // forward/backward is layer-specific
 
     /// Immutably obtains a reference to the weights.
-    fn weights(&self) -> &WithGrad<Tensor<RANK, IN_SIZE>>;
+    fn weights(&self) -> Option<&WithGrad<Tensor<RANK, IN_SIZE>>>;
 
     /// Mutably obtains a reference to the weights.
-    fn weights_mut(&mut self) -> &mut WithGrad<Tensor<RANK, IN_SIZE>>;
+    fn weights_mut(&mut self) -> Option<&mut WithGrad<Tensor<RANK, IN_SIZE>>>;
 
     /// Moves the weights out of the layer by value.
     #[must_use]
-    fn into_weights(self) -> WithGrad<Tensor<RANK, IN_SIZE>>;
+    fn into_weights(self) -> Option<WithGrad<Tensor<RANK, IN_SIZE>>>;
 
     /// Zeroes the gradients of the weights mutably.
     #[inline]
     fn zero_grad(&mut self) {
+        let weights = if let Some(w) = self.weights_mut() {
+            w
+        } else {
+            return;
+        };
+
         #[cfg(feature = "dyntensor")]
-        let shape = self.weights().get_grad().shape();
+        let shape = weights.get_grad().shape();
         #[cfg(not(feature = "dyntensor"))]
-        let shape = self.weights().get_grad().shape_array();
+        let shape = weights.get_grad().shape_array();
 
         let tensor = Tensor::zeros(shape);
 
         // set gradient to zeroed tensor of current shape
-        self.weights_mut().set_grad(tensor);
+        weights.set_grad(tensor);
     }
 
     /// Applies an optimizer update to the weights.
@@ -47,7 +54,9 @@ pub trait Layer<const RANK: usize, const IN_SIZE: usize> {
         optim: fn(&mut WithGrad<Tensor<RANK, IN_SIZE>>, TensorFloat),
     ) {
         // applies an update
-        optim(self.weights_mut(), lr);
+        if let Some(w) = self.weights_mut() {
+            optim(w, lr);
+        }
     }
 }
 
@@ -160,16 +169,18 @@ impl<const RANK: usize, const SIZE: usize> DenseLayer<RANK, SIZE> {
 }
 
 impl<const RANK: usize, const IN_SIZE: usize> Layer<RANK, IN_SIZE> for DenseLayer<RANK, IN_SIZE> {
-    fn weights(&self) -> &WithGrad<Tensor<RANK, IN_SIZE>> {
-        &self.weights
+    #[inline(always)]
+    fn weights(&self) -> Option<&WithGrad<Tensor<RANK, IN_SIZE>>> {
+        Some(&self.weights)
     }
 
-    fn weights_mut(&mut self) -> &mut WithGrad<Tensor<RANK, IN_SIZE>> {
-        &mut self.weights
+    #[inline(always)]
+    fn weights_mut(&mut self) -> Option<&mut WithGrad<Tensor<RANK, IN_SIZE>>> {
+        Some(&mut self.weights)
     }
 
-    fn into_weights(self) -> WithGrad<Tensor<RANK, IN_SIZE>> {
-        self.weights
+    fn into_weights(self) -> Option<WithGrad<Tensor<RANK, IN_SIZE>>> {
+        Some(self.weights)
     }
 }
 
@@ -192,7 +203,6 @@ impl<const RANK: usize, const SIZE: usize, Activator: ActivationFn>
     #[must_use]
     pub fn build(self) -> ActivationLayer<RANK, SIZE> {
         ActivationLayer {
-            weights: Tensor::new(&self.shape, &self.data).with_grad(),
             actfn: Activator::kind(),
         }
     }
@@ -200,14 +210,13 @@ impl<const RANK: usize, const SIZE: usize, Activator: ActivationFn>
 
 /// A layer that uses the provided activation function to propagate gradients.
 pub struct ActivationLayer<const RANK: usize, const SIZE: usize> {
-    weights: WithGrad<Tensor<RANK, SIZE>>,
     actfn: ActivationKind,
 }
 
 impl<const RANK: usize, const SIZE: usize> ActivationLayer<RANK, SIZE> {
     /// Forwards the activation layer.
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn forward<'a>(
         &'a self,
         input: &'a WithGrad<Tensor<RANK, SIZE>>,
@@ -217,14 +226,18 @@ impl<const RANK: usize, const SIZE: usize> ActivationLayer<RANK, SIZE> {
                 let (out, back) = relu(input);
                 (out, Backward::Unary(back))
             }
+            ActivationKind::Softmax => {
+                let (out, back) = softmax(input);
+                (out, Backward::Unary(back))
+            }
             ActivationKind::Sigmoid => unimplemented!("activation not implemented"),
         }
     }
 
     /// Differentiates the activation layer with the provided closure.
+    #[inline]
     #[must_use]
     #[allow(clippy::unnecessary_wraps)]
-    #[inline]
     pub fn backward(
         &self,
         grad_output: Tensor<RANK, SIZE>,
@@ -246,15 +259,18 @@ impl<const RANK: usize, const SIZE: usize> ActivationLayer<RANK, SIZE> {
 impl<const RANK: usize, const IN_SIZE: usize> Layer<RANK, IN_SIZE>
     for ActivationLayer<RANK, IN_SIZE>
 {
-    fn weights(&self) -> &WithGrad<Tensor<RANK, IN_SIZE>> {
-        &self.weights
+    #[inline(always)]
+    fn weights(&self) -> Option<&WithGrad<Tensor<RANK, IN_SIZE>>> {
+        None
     }
 
-    fn weights_mut(&mut self) -> &mut WithGrad<Tensor<RANK, IN_SIZE>> {
-        &mut self.weights
+    #[inline(always)]
+    fn weights_mut(&mut self) -> Option<&mut WithGrad<Tensor<RANK, IN_SIZE>>> {
+        None
     }
 
-    fn into_weights(self) -> WithGrad<Tensor<RANK, IN_SIZE>> {
-        self.weights
+    #[inline(always)]
+    fn into_weights(self) -> Option<WithGrad<Tensor<RANK, IN_SIZE>>> {
+        None
     }
 }

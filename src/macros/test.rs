@@ -10,8 +10,8 @@ use tensor_optim::TensorOps;
 fn __percentage_correct<const D: usize, const N: usize>(
     output: &Tensor<D, N>,
     target: &Tensor<D, N>,
-) -> f64 {
-    let mut correct = 0f64;
+) -> f32 {
+    let mut correct = 0f32;
     for (a, b) in output.data().iter().zip(target.data().iter()) {
         let prec = (a - b).approx_eq(&0.0);
         if prec == ApproxEquality::Precise {
@@ -28,7 +28,7 @@ fn __percentage_correct<const D: usize, const N: usize>(
             correct += 0.05;
         }
     }
-    (correct * 100.0) / (target.len() as f64)
+    (correct * 100.0) / (target.len() as f32)
 }
 
 /// Estimates the accuracy of an inference with respect to the target.
@@ -37,7 +37,7 @@ fn __percentage_correct<const D: usize, const N: usize>(
 /// as the correct accuracy of the inference.
 #[must_use]
 #[cfg(feature = "dyntensor")]
-pub fn percentage_correct(output: &Tensor<0, 0>, target: &Tensor<0, 0>) -> f64 {
+pub fn percentage_correct(output: &Tensor<0, 0>, target: &Tensor<0, 0>) -> f32 {
     __percentage_correct::<0, 0>(output, target)
 }
 /// Estimates the accuracy of an inference with respect to the target.
@@ -49,42 +49,42 @@ pub fn percentage_correct(output: &Tensor<0, 0>, target: &Tensor<0, 0>) -> f64 {
 pub fn percentage_correct<const D: usize, const N: usize>(
     output: &Tensor<D, N>,
     target: &Tensor<D, N>,
-) -> f64 {
+) -> f32 {
     __percentage_correct::<D, N>(output, target)
 }
 
 fn __accuracy_of<const D: usize, const N: usize>(
     output: &Tensor<D, N>,
     target: &Tensor<D, N>,
-) -> f64 {
-    let mut correct = 0f64;
+) -> f32 {
+    let mut correct = 0f32;
     for (a, b) in output.data().iter().zip(target.data().iter()) {
         if approx_eq(a, b) {
             // when roughly exactly equal, give a full point
             correct += 1.0;
         }
     }
-    (correct * 100.0) / (target.len().min(output.len()) as f64)
+    (correct * 100.0) / (target.len().min(output.len()) as f32)
 }
 
 /// Approximates the accuracy of the output based off it's target.
 ///
-/// The accuracy returned by this as an `f64` is based off how many elements of each tensor are
+/// The accuracy returned by this as an `f32` is based off how many elements of each tensor are
 /// relatively equal in the form of percentage, with the assumption that the lengths are the same.
 #[must_use]
 #[cfg(feature = "dyntensor")]
-pub fn accuracy_of(output: &Tensor<0, 0>, target: &Tensor<0, 0>) -> f64 {
+pub fn accuracy_of(output: &Tensor<0, 0>, target: &Tensor<0, 0>) -> f32 {
     __accuracy_of::<0, 0>(output, target)
 }
 /// Approximates the accuracy of the output based off it's target.
 ///
-/// The accuracy returned by this as an `f64` is based off how many elements of each tensor are
+/// The accuracy returned by this as an `f32` is based off how many elements of each tensor are
 /// relatively equal in the form of percentage, with the assumption that the lengths are the same.
 #[must_use]
 #[cfg(not(feature = "dyntensor"))]
 pub fn accuracy_of<const D: usize, const N: usize>(
     output: &Tensor<D, N>,
     target: &Tensor<D, N>,
-) -> f64 {
+) -> f32 {
     __accuracy_of::<D, N>(output, target)
 }

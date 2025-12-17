@@ -32,8 +32,16 @@
 //! - SIMD paths use `unsafe` blocks and assume 64-bit AVX2-capable CPUs
 //! - Runtime checks are encouraged but not enforced in this module
 
+use crate::nn::TensorFloat;
+
+mod cross_entropy_loss;
+pub use self::cross_entropy_loss::cross_entropy_loss;
+
 mod matmul;
 pub use self::matmul::matmul;
+
+mod mse_loss;
+pub use self::mse_loss::mse_loss;
 
 mod relu;
 pub use self::relu::relu;
@@ -41,8 +49,32 @@ pub use self::relu::relu;
 mod sgd;
 pub use self::sgd::sgd;
 
-mod mse_loss;
-pub use self::mse_loss::mse_loss;
+mod softmax;
+pub use self::softmax::softmax;
+
+#[inline]
+fn exp(x: TensorFloat) -> TensorFloat {
+    #[cfg(feature = "f64")]
+    {
+        libm::exp(x)
+    }
+    #[cfg(not(feature = "f64"))]
+    {
+        TensorFloat::from(libm::expf(x as f32))
+    }
+}
+
+#[inline]
+fn ln(x: TensorFloat) -> TensorFloat {
+    #[cfg(feature = "f64")]
+    {
+        libm::log(x)
+    }
+    #[cfg(not(feature = "f64"))]
+    {
+        TensorFloat::from(libm::logf(x as f32))
+    }
+}
 
 #[cfg(test)]
 mod tests {

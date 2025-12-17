@@ -1,9 +1,11 @@
+use crate::nn::IntermediateFp;
 use crate::nn::io::{SerialTensorError, SerialTensorErrorKind, BPAT_MAGIC_V0};
 use crate::nn::tensors::TensorGrad;
-use crate::nn::TensorFloat;
 #[cfg(feature = "alloc")]
 use alloc::{vec, vec::Vec};
 use briny::raw::{slice_to_bytes, to_bytes};
+#[cfg(feature = "std")]
+use briny::traits::Pod;
 use core::mem::zeroed;
 #[cfg(feature = "std")]
 use std::fs::File;
@@ -12,7 +14,7 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use tensor_optim::TensorOps;
 
 #[cfg(feature = "std")]
-pub fn save_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn save_tensors<T: TensorGrad<U> + TensorOps<U>, U: Copy + Pod + IntermediateFp>(
     path: &str,
     tensors: &[T],
 ) -> Result<(), SerialTensorError> {
@@ -39,7 +41,7 @@ pub fn save_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
 }
 
 #[cfg(feature = "std")]
-pub fn load_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn load_tensors<T: TensorGrad<U> + TensorOps<U>, U: Copy + Pod + IntermediateFp>(
     path: &str,
 ) -> Result<Vec<T>, SerialTensorError> {
     let mut file = BufReader::new(File::open(path).map_err(|_| SerialTensorError {
@@ -58,7 +60,7 @@ pub fn load_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
 }
 
 #[cfg(feature = "alloc")]
-pub fn serialize_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn serialize_tensors<T: TensorGrad<U> + TensorOps<U>, U: Copy + Pod + IntermediateFp>(
     tensors: &[T],
     buf: &mut [u8],
 ) {
@@ -85,7 +87,7 @@ pub fn serialize_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
 }
 
 #[cfg(feature = "alloc")]
-pub fn deserialize_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn deserialize_tensors<T: TensorGrad<U> + TensorOps<U>, U: Copy + Pod + IntermediateFp>(
     tensors: &mut [T],
     buf: &[u8],
 ) -> Result<(), SerialTensorError> {
@@ -114,7 +116,7 @@ pub fn deserialize_tensors<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
 }
 
 #[cfg(feature = "alloc")]
-pub fn serialize_tensor<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn serialize_tensor<T: TensorGrad<U> + TensorOps<U>, U: Copy + Pod + IntermediateFp>(
     tensor: &T,
     buf: &mut [u8],
 ) -> usize {
@@ -123,7 +125,7 @@ pub fn serialize_tensor<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
     let data = tensor
         .data()
         .iter()
-        .map(|&x| x as f64)
+        .map(|&x| x.into_f64())
         .collect::<Vec<f64>>();
     let data = data.as_slice();
     let shape = tensor
@@ -151,7 +153,7 @@ pub fn serialize_tensor<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
 }
 
 #[cfg(feature = "alloc")]
-pub fn deserialize_tensor<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
+pub fn deserialize_tensor<T: TensorGrad<U> + TensorOps<U>, U: Copy + Pod + IntermediateFp>(
     tensor: &mut T,
     buf: &[u8],
 ) -> Result<usize, SerialTensorError> {
@@ -185,10 +187,10 @@ pub fn deserialize_tensor<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
         idx += 8;
 
         data.push(
-            f64::from_ne_bytes(buf8.try_into().map_err(|_| SerialTensorError {
+            U::from_f64(f64::from_ne_bytes(buf8.try_into().map_err(|_| SerialTensorError {
                 kind: SerialTensorErrorKind::InvalidData,
                 msg: "tensor shape incorrect for data",
-            })?) as TensorFloat,
+            })?)),
         );
     }
 
@@ -207,7 +209,7 @@ pub fn deserialize_tensor<T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>>(
 }
 
 pub fn save_tensor<
-    T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>,
+    T: TensorGrad<U> + TensorOps<U>, U: Copy + Pod + IntermediateFp,
     const N: usize,
     const D: usize,
 >(
@@ -219,7 +221,7 @@ pub fn save_tensor<
     let mut data = unsafe { zeroed::<[f64; N]>() };
     #[allow(clippy::unnecessary_cast)]
     for (i, val) in tensor.data().iter().enumerate() {
-        data[i] = *val as _;
+        data[i] = (*val).into_f64();
     }
     let mut shape = unsafe { zeroed::<[u64; D]>() };
     #[allow(clippy::unnecessary_cast)]
@@ -245,7 +247,7 @@ pub fn save_tensor<
 }
 
 pub fn load_tensor<
-    T: TensorGrad<TensorFloat> + TensorOps<TensorFloat>,
+    T: TensorGrad<U> + TensorOps<U>, U: Copy + Pod + IntermediateFp,
     const N: usize,
     const D: usize,
 >(
@@ -283,12 +285,12 @@ pub fn load_tensor<
         }
     }
 
-    let mut data = unsafe { zeroed::<[TensorFloat; N]>() };
+    let mut data = unsafe { zeroed::<[U; N]>() };
     for val in &mut data {
         let buf8 = &buf[idx..idx + 8];
         idx += 8;
 
-        *val = f64::from_ne_bytes(buf8.try_into().map_err(|_| unreachable!())?) as TensorFloat;
+        *val = U::from_f64(f64::from_ne_bytes(buf8.try_into().map_err(|_| unreachable!())?));
     }
 
     *tensor = T::new_with_data(&data, &shape);
@@ -311,7 +313,7 @@ mod tests {
 
         save_tensors("checkpoints/test/v0.bpat", &original).unwrap();
 
-        let loaded: Vec<VecTensor<TensorFloat>> = load_tensors("checkpoints/test/v0.bpat").unwrap();
+        let loaded: Vec<VecTensor<f32>> = load_tensors("checkpoints/test/v0.bpat").unwrap();
 
         assert_eq!(original, loaded.as_slice());
     }

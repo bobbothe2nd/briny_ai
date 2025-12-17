@@ -1,4 +1,3 @@
-#[cfg(all(feature = "std", feature = "dyntensor"))]
 fn main() {
     use std::fs::File;
     use std::io::Read;
@@ -146,9 +145,4 @@ fn main() {
     //         &tensor.data()[..5]
     //     );
     // }
-}
-
-#[cfg(not(all(feature = "std", feature = "dyntensor")))]
-fn main() {
-    println!("MNIST not supported without `std` and `dyntensor`");
 }
