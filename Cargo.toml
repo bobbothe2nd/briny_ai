@@ -48,7 +48,6 @@ name = "core"
 required-features = []
 
 [features]
-default = ["dyntensor"]
 
 # float type used
 f64 = [] # probably shouldn't use without alloc (closure size)

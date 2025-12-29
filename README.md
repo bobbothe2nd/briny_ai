@@ -4,7 +4,7 @@
 
 There is model serialization/deserialization support under an unstable API, this cannot be accessed by users of the crate though. To top that, the low level intrinsics are wrapped in high level datasets and abstracted away by a complex macro system that generates models automatically with unrolled training and testing loops.
 
-The recent additions in v0.5.0 have enabled the creation of generative AI with tools like cross entropy loss and softmax activation. See examples like `char_rnn` for use of such tools. The main goal for v0.5.1 is finally getting the BPATv0/BPATv1 stuff working to reintroduce saving/loading tensors, and by extension, entire models.
+The recent additions in v0.5.1 have enabled the creation of generative AI with tools like cross entropy loss and softmax activation. See examples like `char_rnn` and `transformer` for use of such tools. The main goal for v0.5.2 is finally getting the BPATv0/BPATv1 stuff working to reintroduce saving/loading tensors, and by extension, entire models.
 
 ## Example
 

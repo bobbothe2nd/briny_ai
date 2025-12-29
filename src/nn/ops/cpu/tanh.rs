@@ -13,8 +13,7 @@ use alloc::boxed::Box;
 #[cfg(not(feature = "alloc"))]
 use box_closure::{Align8, OpaqueFn};
 
-/// Applies a tanh activation function element-wise:
-/// `f(x) = tanh(x)`
+/// Applies a tanh activation function element-wise.
 #[must_use]
 #[cfg(feature = "dyntensor")]
 pub fn tanh(
@@ -61,6 +60,7 @@ pub fn tanh(
     (out, Box::new(back))
 }
 
+/// Applies a tanh activation function element-wise.
 #[must_use]
 #[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
 pub fn tanh<const N: usize, const D: usize>(
@@ -108,6 +108,7 @@ pub fn tanh<const N: usize, const D: usize>(
     (out, Box::new(back))
 }
 
+/// Applies a tanh activation function element-wise.
 #[must_use]
 #[cfg(not(feature = "alloc"))]
 pub fn tanh<const N: usize, const D: usize>(

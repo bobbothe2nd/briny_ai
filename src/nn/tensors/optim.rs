@@ -821,6 +821,7 @@ where
         Self(ArrTensor::new(*shape))
     }
 
+    /// Maps each element of the data.
     #[must_use]
     pub fn map<U, F>(&self, f: F) -> Tensor<U, N, D>
     where
@@ -831,6 +832,7 @@ where
         Tensor(self.0.map(f))
     }
 
+    /// Maps each element of the data of `self` and `other`.
     #[must_use]
     pub fn zip_map<U, V, F>(&self, other: &Tensor<U, N, D>, f: F) -> Tensor<V, N, D>
     where
