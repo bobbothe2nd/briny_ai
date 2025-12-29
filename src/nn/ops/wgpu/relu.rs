@@ -50,16 +50,14 @@ pub fn wgpu_relu(
         &{
             #[cfg(feature = "f64")]
             {
-                output
-                    .into_iter()
-                    .map(TensorFloat::from)
+                output.into_iter().map(TensorFloat::from)
             }
             #[cfg(not(feature = "f64"))]
             {
-                output
-                    .into_iter()
+                output.into_iter()
             }
-        }.collect::<Vec<TensorFloat>>(),
+        }
+        .collect::<Vec<TensorFloat>>(),
     );
     let back = move |grad: Tensor<TensorFloat>| {
         let grad_data = grad
@@ -116,16 +114,14 @@ pub fn wgpu_relu<const N: usize, const D: usize>(
             &{
                 #[cfg(feature = "f64")]
                 {
-                    output
-                        .into_iter()
-                        .map(TensorFloat::from)
+                    output.into_iter().map(TensorFloat::from)
                 }
                 #[cfg(not(feature = "f64"))]
                 {
-                    output
-                        .into_iter()
+                    output.into_iter()
                 }
-            }.collect::<Vec<TensorFloat>>(),
+            }
+            .collect::<Vec<TensorFloat>>(),
         ),
     );
 

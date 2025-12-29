@@ -63,13 +63,6 @@ impl TryFrom<u8> for Backend {
 #[cfg(target_has_atomic = "8")]
 static GLOBAL_DEFAULT_BACKEND: AtomicU8 = AtomicU8::new(Backend::Cpu as u8);
 
-/// A mutable non-atomic unsynchronized backend state.
-///
-/// It is assumed that this will not be accessed concurrently. There really
-/// should be a mutex or something around this.
-#[cfg(not(target_has_atomic = "8"))]
-static mut UNSAFE_GLOBAL_BACKEND: u8 = Backend::Cpu as u8;
-
 /// Sets the active backend to use for tensor computation.
 ///
 /// # Example
@@ -80,8 +73,8 @@ static mut UNSAFE_GLOBAL_BACKEND: u8 = Backend::Cpu as u8;
 /// ```
 pub fn set_backend(b: Backend) {
     #[cfg(not(target_has_atomic = "8"))]
-    unsafe {
-        UNSAFE_GLOBAL_BACKEND = b as u8;
+    const {
+        panic!("cannot write backend on target");
     }
     #[cfg(target_has_atomic = "8")]
     GLOBAL_DEFAULT_BACKEND.store(b as u8, Ordering::Release);
@@ -99,8 +92,8 @@ pub fn set_backend(b: Backend) {
 /// ```
 pub fn get_backend() -> Backend {
     #[cfg(not(target_has_atomic = "8"))]
-    {
-        Backend::try_from(unsafe { UNSAFE_GLOBAL_BACKEND }).unwrap_or_default()
+    const {
+        panic!("cannot read backend on target");
     }
     #[cfg(target_has_atomic = "8")]
     Backend::try_from(GLOBAL_DEFAULT_BACKEND.load(Ordering::Acquire)).unwrap_or_default()

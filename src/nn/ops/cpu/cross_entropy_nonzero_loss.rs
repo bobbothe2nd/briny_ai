@@ -12,10 +12,10 @@ use alloc::vec;
 #[cfg(not(feature = "alloc"))]
 use box_closure::{Align8, OpaqueFn};
 
-/// Cross-entropy loss for arbitrary-rank tensors along last axis.
+/// Cross-entropy loss for arbitrary-rank tensors along last axis, ignoring zeroed timesteps.
 #[must_use]
 #[cfg(feature = "dyntensor")]
-pub fn cross_entropy_loss<'a>(
+pub fn cross_entropy_nonzero_loss<'a>(
     prediction: &'a WithGrad<Tensor<TensorFloat>>,
     target: &'a Tensor<TensorFloat>,
 ) -> (
@@ -34,10 +34,19 @@ pub fn cross_entropy_loss<'a>(
     let mut softmax = vec![0.0; pred_data.len()];
     let mut loss_sum = 0.0;
 
-    for i in 0..outer_size {
+    let mut nonzero_mask = alloc::vec![true; outer_size];
+    let mut valid_timesteps = 0_usize;
+
+    for (i, val) in nonzero_mask.iter_mut().enumerate().take(outer_size) {
         let offset = i * last_dim;
         let slice = &pred_data[offset..offset + last_dim];
         let t_slice = &target_data[offset..offset + last_dim];
+
+        let is_padding = t_slice.iter().all(|&x| x == 0.0);
+        if is_padding {
+            *val = false;
+            continue;
+        }
 
         let max_val = slice
             .iter()
@@ -50,14 +59,20 @@ pub fn cross_entropy_loss<'a>(
             softmax[offset + j] = s;
             loss_sum -= t_slice[j] * ln(s);
         }
+
+        valid_timesteps += 1;
     }
 
-    let n_samples = outer_size as TensorFloat;
+    let n_samples = valid_timesteps.max(1) as TensorFloat;
     let loss = loss_sum / n_samples;
 
     let back = move |grad_output: TensorFloat| {
         let mut grad = vec![0.0; pred_data.len()];
-        for i in 0..outer_size {
+        for (i, val) in nonzero_mask.iter().enumerate().take(outer_size) {
+            if !*val {
+                continue;
+            }
+
             let offset = i * last_dim;
             let t_slice = &target_data[offset..offset + last_dim];
             let s_slice = &softmax[offset..offset + last_dim];
@@ -72,10 +87,10 @@ pub fn cross_entropy_loss<'a>(
     (loss, Box::new(back))
 }
 
-/// Cross-entropy loss for arbitrary-rank tensors along last axis.
+/// Cross-entropy loss for arbitrary-rank tensors along last axis, ignoring zeroed timesteps.
 #[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
 #[must_use]
-pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
+pub fn cross_entropy_nonzero_loss<'a, const N: usize, const D: usize>(
     prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
     target: &'a Tensor<TensorFloat, N, D>,
 ) -> (
@@ -94,10 +109,19 @@ pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
     let mut softmax = [0.0; N];
     let mut loss_sum = 0.0;
 
-    for i in 0..outer_size {
+    let mut nonzero_mask = alloc::vec![true; outer_size];
+    let mut valid_timesteps = 0_usize;
+
+    for (i, val) in nonzero_mask.iter_mut().enumerate().take(outer_size) {
         let offset = i * last_dim;
         let slice = &pred_data[offset..offset + last_dim];
         let t_slice = &target_data[offset..offset + last_dim];
+
+        let is_padding = t_slice.iter().all(|&x| x == 0.0);
+        if is_padding {
+            *val = false;
+            continue;
+        }
 
         let max_val = slice
             .iter()
@@ -110,14 +134,20 @@ pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
             softmax[offset + j] = s;
             loss_sum -= t_slice[j] * ln(s);
         }
+
+        valid_timesteps += 1;
     }
 
-    let n_samples = outer_size as TensorFloat;
+    let n_samples = valid_timesteps.max(1) as TensorFloat;
     let loss = loss_sum / n_samples;
 
     let back = move |grad_output: TensorFloat| {
         let mut grad = [0.0; N];
-        for i in 0..outer_size {
+        for (i, val) in nonzero_mask.iter().enumerate().take(outer_size) {
+            if !*val {
+                continue;
+            }
+
             let offset = i * last_dim;
             let t_slice = &target_data[offset..offset + last_dim];
             let s_slice = &softmax[offset..offset + last_dim];
@@ -132,10 +162,10 @@ pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
     (loss, Box::new(back))
 }
 
-/// Cross-entropy loss for arbitrary-rank tensors along last axis.
+/// Cross-entropy loss for arbitrary-rank tensors along last axis, ignoring zeroed timesteps.
 #[cfg(not(feature = "alloc"))]
 #[must_use]
-pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
+pub fn cross_entropy_nonzero_loss<'a, const N: usize, const D: usize>(
     prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
     target: &'a Tensor<TensorFloat, N, D>,
 ) -> (
@@ -154,10 +184,19 @@ pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
     let mut softmax = [0.0; N];
     let mut loss_sum = 0.0;
 
-    for i in 0..outer_size {
+    let mut nonzero_mask = [true; N]; // outer_size <= N
+    let mut valid_timesteps = 0_usize;
+
+    for (i, val) in nonzero_mask.iter_mut().enumerate().take(outer_size) {
         let offset = i * last_dim;
         let slice = &pred_data[offset..offset + last_dim];
         let t_slice = &target_data[offset..offset + last_dim];
+
+        let is_padding = t_slice.iter().all(|&x| x == 0.0);
+        if is_padding {
+            *val = false;
+            continue;
+        }
 
         let max_val = slice
             .iter()
@@ -170,14 +209,20 @@ pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
             softmax[offset + j] = s;
             loss_sum -= t_slice[j] * ln(s);
         }
+
+        valid_timesteps += 1;
     }
 
-    let n_samples = outer_size as TensorFloat;
+    let n_samples = valid_timesteps.max(1) as TensorFloat;
     let loss = loss_sum / n_samples;
 
     let back = move |grad_output: TensorFloat| {
         let mut grad = [0.0; N];
-        for i in 0..outer_size {
+        for (i, val) in nonzero_mask.iter().enumerate().take(outer_size) {
+            if !*val {
+                continue;
+            }
+
             let offset = i * last_dim;
             let t_slice = &target_data[offset..offset + last_dim];
             let s_slice = &softmax[offset..offset + last_dim];

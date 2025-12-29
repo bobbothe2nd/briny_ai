@@ -1,9 +1,9 @@
+use super::exp;
 use crate::nn::{
     tensors::{Tensor, WithGrad},
     TensorFloat,
 };
 use tensor_optim::TensorOps;
-use super::exp;
 
 #[cfg(feature = "dyntensor")]
 use alloc::vec;
@@ -35,7 +35,10 @@ pub fn softmax(
         let offset = i * last_dim;
         let slice = &input_data[offset..offset + last_dim];
 
-        let max_val = slice.iter().copied().fold(TensorFloat::NEG_INFINITY, TensorFloat::max);
+        let max_val = slice
+            .iter()
+            .copied()
+            .fold(TensorFloat::NEG_INFINITY, TensorFloat::max);
         let exp_sum: TensorFloat = slice.iter().map(|&x| exp(x - max_val)).sum();
 
         for j in 0..last_dim {
@@ -73,11 +76,11 @@ pub fn softmax(
 /// Softmax along the last axis of an arbitrary-rank tensor.
 #[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
 #[must_use]
-pub fn softmax<const N: usize, const D: usize>(
-    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N1, D>>,
 ) -> (
-    Tensor<TensorFloat, N, D>,
-    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+    Tensor<TensorFloat, N2, D>,
+    Box<dyn Fn(Tensor<TensorFloat, N2, D>) -> Tensor<TensorFloat, N1, D> + '_>,
 ) {
     use tensor_optim::ConstTensorOps;
 
@@ -86,13 +89,16 @@ pub fn softmax<const N: usize, const D: usize>(
     let last_dim = shape[D - 1];
     let outer_size: usize = shape[..D - 1].iter().product();
 
-    let mut out_data = [TensorFloat::default(); N];
+    let mut out_data = [TensorFloat::default(); N2];
 
     for i in 0..outer_size {
         let offset = i * last_dim;
         let slice = &input_data[offset..offset + last_dim];
 
-        let max_val = slice.iter().copied().fold(TensorFloat::NEG_INFINITY, TensorFloat::max);
+        let max_val = slice
+            .iter()
+            .copied()
+            .fold(TensorFloat::NEG_INFINITY, TensorFloat::max);
         let exp_sum: TensorFloat = slice.iter().map(|&x| exp(x - max_val)).sum();
 
         for j in 0..last_dim {
@@ -104,9 +110,9 @@ pub fn softmax<const N: usize, const D: usize>(
 
     let back = {
         let out_clone = out_data;
-        move |grad_output: Tensor<TensorFloat, N, D>| {
+        move |grad_output: Tensor<TensorFloat, N2, D>| {
             let grad_data = grad_output.data();
-            let mut grad = [TensorFloat::default(); N];
+            let mut grad = [TensorFloat::default(); N1];
 
             for i in 0..outer_size {
                 let offset = i * last_dim;
@@ -130,11 +136,11 @@ pub fn softmax<const N: usize, const D: usize>(
 /// Softmax along the last axis of an arbitrary-rank tensor.
 #[cfg(not(feature = "alloc"))]
 #[must_use]
-pub fn softmax<const N: usize, const D: usize>(
-    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N1, D>>,
 ) -> (
-    Tensor<TensorFloat, N, D>,
-        OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+    Tensor<TensorFloat, N2, D>,
+    OpaqueFn<'_, Tensor<TensorFloat, N2, D>, Tensor<TensorFloat, N1, D>, Align8<128>>,
 ) {
     use tensor_optim::ConstTensorOps;
 
@@ -143,13 +149,16 @@ pub fn softmax<const N: usize, const D: usize>(
     let last_dim = shape[D - 1];
     let outer_size: usize = shape[..D - 1].iter().product();
 
-    let mut out_data = [TensorFloat::default(); N];
+    let mut out_data = [TensorFloat::default(); N2];
 
     for i in 0..outer_size {
         let offset = i * last_dim;
         let slice = &input_data[offset..offset + last_dim];
 
-        let max_val = slice.iter().copied().fold(TensorFloat::NEG_INFINITY, TensorFloat::max);
+        let max_val = slice
+            .iter()
+            .copied()
+            .fold(TensorFloat::NEG_INFINITY, TensorFloat::max);
         let exp_sum: TensorFloat = slice.iter().map(|&x| exp(x - max_val)).sum();
 
         for j in 0..last_dim {
@@ -160,14 +169,13 @@ pub fn softmax<const N: usize, const D: usize>(
     let out = Tensor::new(shape, &out_data);
 
     let back = {
-        let out_clone = out_data;
-        move |grad_output: Tensor<TensorFloat, N, D>| {
+        move |grad_output: Tensor<TensorFloat, N2, D>| {
             let grad_data = grad_output.data();
-            let mut grad = [TensorFloat::default(); N];
+            let mut grad = [TensorFloat::default(); N1];
 
             for i in 0..outer_size {
                 let offset = i * last_dim;
-                let y = &out_clone[offset..offset + last_dim];
+                let y = &out_data[offset..offset + last_dim];
                 let dy = &grad_data[offset..offset + last_dim];
 
                 let dot: TensorFloat = y.iter().zip(dy.iter()).map(|(&yi, &dyi)| yi * dyi).sum();

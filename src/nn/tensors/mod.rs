@@ -38,7 +38,7 @@ impl<T: TensorGrad<U>, U> IntoWithGrad<U> for T {}
 ///
 /// Typically used as `WithGrad<f32>` or `WithGrad<f64>`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct WithGrad<T, U = TensorFloat> {
+pub struct WithGrad<T: TensorGrad<U>, U = TensorFloat> {
     value: T,
     grad: T,
     _marker: PhantomData<U>,
@@ -105,5 +105,31 @@ impl<T: TensorGrad<U>, U> WithGrad<T, U> {
     /// Discards the value and moves out of the gradient.
     pub fn into_grad(self) -> T {
         self.grad
+    }
+
+    /// Maps the value of `self`.
+    #[must_use]
+    pub fn map_value<F>(self, f: F) -> Self
+    where 
+        F: Fn(T) -> T,
+    {
+        Self {
+            value: f(self.value),
+            grad: self.grad,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Maps the gradient of `self`.
+    #[must_use]
+    pub fn map_grad<F>(self, f: F) -> Self
+    where 
+        F: Fn(T) -> T,
+    {
+        Self {
+            value: self.value,
+            grad: f(self.grad),
+            _marker: PhantomData,
+        }
     }
 }

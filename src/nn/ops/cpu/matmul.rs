@@ -178,7 +178,7 @@ pub fn matmul<'a, const A: usize, const B: usize, const OUT: usize, const D: usi
     let out = a_val.matmul(b_val);
 
     // gradients closure
-    let back = move |grad: Tensor<TensorFloat, OUT, D>| {
+    let back = |grad: Tensor<TensorFloat, OUT, D>| {
         // transpose last two axes
         let b_t = b_val.transpose();
         let a_t = a_val.transpose();

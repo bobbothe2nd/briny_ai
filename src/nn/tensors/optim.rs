@@ -22,6 +22,7 @@ use crate::nn::tensors::VecTensor;
 use core::{
     mem::{ManuallyDrop, MaybeUninit},
     num::Wrapping,
+    ops::{Add, Div, Mul, Sub},
     sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize},
 };
 
@@ -120,6 +121,10 @@ impl<T: Default + Copy + Unflatten, const X: usize, const Y: usize, const N: usi
     type Flattened = [T; N];
 
     fn flatten(&self) -> Self::Flattened {
+        const {
+            assert!(N == X * Y, "flattenning to an invalid length");
+        }
+
         let mut arr = [T::default(); N];
         for (i, chunk) in self.iter().enumerate() {
             let start = i * X;
@@ -141,6 +146,10 @@ impl<
     type Flattened = [T; N];
 
     fn flatten(&self) -> Self::Flattened {
+        const {
+            assert!(N == X * Y * Z, "flattenning to an invalid length");
+        }
+
         let mut arr = [T::default(); N];
         for chunk_x in self {
             for (iy, chunk_y) in chunk_x.iter().enumerate() {
@@ -273,6 +282,215 @@ pub use tensor_optim::ArrTensor;
 
 use crate::nn::TensorFloat;
 
+#[cfg(feature = "dyntensor")]
+impl<T> Add<Self> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> Add<Self> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> Add<T> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn add(self, rhs: T) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> Add<T> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn add(self, rhs: T) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> Sub<Self> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> Sub<Self> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> Sub<T> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn sub(self, rhs: T) -> Self::Output {
+        Self(self.0 - rhs)
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> Sub<T> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn sub(self, rhs: T) -> Self::Output {
+        Self(self.0 - rhs)
+    }
+}
+
+//
+#[cfg(feature = "dyntensor")]
+impl<T> Mul<Self> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self(self.0 * rhs.0)
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> Mul<Self> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self(self.0 * rhs.0)
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> Mul<T> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn mul(self, rhs: T) -> Self::Output {
+        Self(self.0 * rhs)
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> Mul<T> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn mul(self, rhs: T) -> Self::Output {
+        Self(self.0 * rhs)
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> Div<Self> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        Self(self.0 / rhs.0)
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> Div<Self> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        Self(self.0 / rhs.0)
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> Div<T> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn div(self, rhs: T) -> Self::Output {
+        Self(self.0 / rhs)
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> Div<T> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    type Output = Self;
+
+    fn div(self, rhs: T) -> Self::Output {
+        Self(self.0 / rhs)
+    }
+}
+
 /// A simple tensor with decent flexibility.
 ///
 /// It's entirely heap-allocated, so it won't typically
@@ -362,6 +580,30 @@ where
     #[must_use]
     pub fn zeros(shape: &[usize]) -> Self {
         Self(DynTensor::new(shape))
+    }
+
+    /// Maps each element of the data.
+    #[must_use]
+    pub fn map<U, F>(&self, f: F) -> Tensor<U>
+    where
+        F: Fn(&T) -> U,
+        U: SimdElement + Primitive + Default,
+        [U; FLOAT_LANES]: NonAssociativeSimd<[U; FLOAT_LANES], U, { FLOAT_LANES }>,
+    {
+        Tensor(self.0.map(f))
+    }
+
+    /// Maps each element of the data of `self` and `other`.
+    #[must_use]
+    pub fn zip_map<U, V, F>(&self, other: &Tensor<U>, f: F) -> Tensor<V>
+    where
+        F: Fn(&T, &U) -> V,
+        U: SimdElement + Primitive + Default,
+        [U; FLOAT_LANES]: NonAssociativeSimd<[U; FLOAT_LANES], U, { FLOAT_LANES }>,
+        V: SimdElement + Primitive + Default,
+        [V; FLOAT_LANES]: NonAssociativeSimd<[V; FLOAT_LANES], V, { FLOAT_LANES }>,
+    {
+        Tensor(self.0.zip_map(&other.0, f))
     }
 }
 
@@ -578,6 +820,28 @@ where
     {
         Self(ArrTensor::new(*shape))
     }
+
+    #[must_use]
+    pub fn map<U, F>(&self, f: F) -> Tensor<U, N, D>
+    where
+        F: FnMut(T) -> U,
+        U: SimdElement + Primitive + Default,
+        [U; FLOAT_LANES]: AlignedSimd<[U; FLOAT_LANES], U, { FLOAT_LANES }>,
+    {
+        Tensor(self.0.map(f))
+    }
+
+    #[must_use]
+    pub fn zip_map<U, V, F>(&self, other: &Tensor<U, N, D>, f: F) -> Tensor<V, N, D>
+    where
+        F: FnMut(T, U) -> V,
+        U: SimdElement + Primitive + Default,
+        [U; FLOAT_LANES]: AlignedSimd<[U; FLOAT_LANES], U, { FLOAT_LANES }>,
+        V: SimdElement + Primitive + Default,
+        [V; FLOAT_LANES]: AlignedSimd<[V; FLOAT_LANES], V, { FLOAT_LANES }>,
+    {
+        Tensor(self.0.zip_map(&other.0, f))
+    }
 }
 
 #[cfg(not(feature = "dyntensor"))]
@@ -614,8 +878,8 @@ impl<const N: usize, const D: usize> Tensor<TensorFloat, N, D> {
         let self_batch_dims = &self.shape()[..D - 2];
         let rhs_batch_dims = &rhs.shape()[..D - 2];
 
-        debug_assert!(
-            self_batch_dims == rhs_batch_dims,
+        debug_assert_eq!(
+            self_batch_dims, rhs_batch_dims,
             "batch dimensions must match for matmul"
         );
 

@@ -22,7 +22,7 @@ static_model!(
     {
         InputLayer([4, 2]),
         {
-            conv0: Dense([4, 2]) => DenseLayer,
+            conv0: Collapse([4, 2]) => CollapseLayer,
             act0: Activation([4, 1], ReLU) => ActivationLayer,
         },
         OutputLayer([4, 1]),
@@ -44,13 +44,13 @@ fn main() {
 }
 ```
 
-For implementations of the tensor system (as opposed to the macro system), see the `examples/` directory or look at the documentation on `docs.rs`.
+For implementations of the tensor system (as opposed to the macro system), see the `examples/m-*.rs` files in the repository or look at the documentation on `docs.rs`.
 
 ## Contributing
 
 Contributions, bug reports, and suggestions are welcome! This project aims to help build performance-focused foundations for low-level and embedded Rust ML.
 
-Tensor serialization/deserialization, CUDA acceleration, WGPU performance boosts, and extending capabilities of the macro system are the 4 largest areas for improvement - consider contributing in one of those domains.
+Tensor serialization/deserialization, CUDA acceleration, WGPU performance boosts, and adding generic causal layers are the 4 largest areas for improvement - consider contributing in one of those domains.
 
 ## License
 

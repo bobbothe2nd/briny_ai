@@ -37,6 +37,9 @@ use crate::nn::TensorFloat;
 mod cross_entropy_loss;
 pub use self::cross_entropy_loss::cross_entropy_loss;
 
+mod cross_entropy_nonzero_loss;
+pub use self::cross_entropy_nonzero_loss::cross_entropy_nonzero_loss;
+
 mod matmul;
 pub use self::matmul::matmul;
 
@@ -51,6 +54,18 @@ pub use self::sgd::sgd;
 
 mod softmax;
 pub use self::softmax::softmax;
+
+mod sigmoid;
+pub use self::sigmoid::sigmoid;
+
+mod tanh;
+pub use self::tanh::tanh;
+
+mod swish_silu;
+pub use self::swish_silu::swish;
+
+mod gelu;
+pub use self::gelu::gelu;
 
 #[inline]
 fn exp(x: TensorFloat) -> TensorFloat {
@@ -135,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "alloc")]
+    #[cfg(all(feature = "alloc", not(miri)))] // miri makes loss inaccurate
     fn mse_loss_forward_and_backward_matches_expected() {
         let pred_data = [1.0, 2.0, 3.0];
         let target_data = [1.0, 3.0, 2.0];

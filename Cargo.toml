@@ -39,12 +39,16 @@ required-features = []
 name = "char_rnn"
 required-features = []
 
+[[example]]
+name = "transformer"
+required-features = ["std"]
+
 [[test]]
 name = "core"
 required-features = []
 
 [features]
-default = ["alloc"]
+default = ["dyntensor"]
 
 # float type used
 f64 = [] # probably shouldn't use without alloc (closure size)

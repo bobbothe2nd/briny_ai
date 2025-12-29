@@ -7,6 +7,80 @@ use crate::{
 };
 use tensor_optim::TensorOps;
 
+/// A structure containing all the information obtained from a test.
+///
+/// Score predicts the potential of the model, accuracy approximates the correctness of the model, and
+/// loss is tuned per-model based off what operation it performs (MSE, cross entropy, etc.).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TestEval {
+    /// The loss earned by a model from it's chosen function. {#}
+    pub loss: f32,
+
+    /// The precise accuracy (with very small epsilon). {%}
+    ///
+    /// It should be expected that this is always very low, if
+    /// it even rises from 0%.
+    pub acc: f32,
+
+    /// The imaginary "score" of a model. {%}
+    ///
+    /// Like accuracy, but with a dynamic epsilon that gives
+    /// lower scores for higher error.
+    pub score: f32,
+}
+
+impl TestEval {
+    /// Zero everything (loss, accuracy, score).
+    pub const ZERO: Self = Self::new();
+
+    /// Infinite loss, 0% accuracy and score.
+    pub const INF_LOSS: Self = Self {
+        loss: f32::INFINITY,
+        acc: 0.0,
+        score: 0.0,
+    };
+
+    /// Negative infinite loss, 100% accuracy and score.
+    pub const NEG_INF_LOSS: Self = Self {
+        loss: f32::NEG_INFINITY,
+        acc: 100.0,
+        score: 100.0,
+    };
+
+    /// A new zeroed evaluation.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            loss: 0.0,
+            acc: 0.0,
+            score: 0.0,
+        }
+    }
+
+    /// Determines which is "better" based on the loss.
+    #[must_use]
+    pub const fn is_better_than(&self, rhs: &Self) -> bool {
+        self.loss < rhs.loss
+    }
+
+    /// Returns `rhs` if it is "better" than `self`, else `self`.
+    #[must_use]
+    pub const fn best_of<'a>(&'a self, rhs: &'a Self) -> &'a Self {
+        if self.is_better_than(rhs) {
+            self
+        } else {
+            rhs
+        }
+    }
+
+    /// Sets `self` to `rhs` if and only if it is "better" than `self`.
+    pub const fn set_if_better<'a>(&'a mut self, rhs: &'a Self) {
+        if rhs.is_better_than(self) {
+            *self = *rhs;
+        }
+    }
+}
+
 fn __percentage_correct<const D: usize, const N: usize>(
     output: &Tensor<D, N>,
     target: &Tensor<D, N>,

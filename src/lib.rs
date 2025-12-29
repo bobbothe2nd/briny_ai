@@ -23,11 +23,15 @@
     clippy::unused_async,
     clippy::unnecessary_cast,
     clippy::too_many_lines,
-    clippy::manual_slice_size_calculation
+    clippy::manual_slice_size_calculation,
+    clippy::struct_field_names,
+    clippy::cast_lossless,
+    clippy::excessive_precision,
+    clippy::approx_constant
 )]
+#![deny(clippy::nursery, unused_must_use)]
 #![forbid(unsafe_op_in_unsafe_fn)]
-#![forbid(clippy::nursery, unused_must_use)]
-// #![forbid(missing_docs)]
+#![forbid(missing_docs)]
 #![no_std]
 
 #[cfg(feature = "alloc")]
@@ -42,13 +46,13 @@ pub mod approx;
 pub mod backend;
 pub mod nn;
 
-// re-exports to avoid importing through internals
-// these are needed for the macro to function properly
-pub use macros::{Dataset, TestEval};
-
 pub mod prelude {
     //! Common re-exports at a central location.
 
-    pub use crate::backend::{get_backend, set_backend, Backend};
-    pub use crate::{static_model, Dataset, TestEval};
+    pub use crate::{
+        backend::{get_backend, set_backend, Backend},
+        nn::tensors::{Flatten, TensorOps},
+        macros::{Dataset, test::TestEval, Context, adapt_lr, decay_lr},
+        static_model,
+    };
 }

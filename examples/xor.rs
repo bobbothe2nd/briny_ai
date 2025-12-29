@@ -1,4 +1,4 @@
-use briny_ai::prelude::{set_backend, static_model, Backend, Dataset};
+use briny_ai::prelude::*;
 
 static_model!(
     @loss mse_loss
@@ -7,7 +7,7 @@ static_model!(
     {
         InputLayer([4, 2]),
         {
-            conv0: Dense([4, 2]) => DenseLayer,
+            conv0: Collapse([4, 2]) => CollapseLayer,
             act0: Activation([4, 1], ReLU) => ActivationLayer,
         },
         OutputLayer([4, 1]),
@@ -25,22 +25,26 @@ fn main() {
 
     let dataset = Dataset::new(&base_inputs, &base_targets);
 
-    let mut model = XorModel::new().with_lr(0.01);
+    let mut model = XorModel::new(1.0).with_lr(0.01);
 
+    #[cfg(feature = "std")]
     println!("Loading model...");
 
     // let _ = model.load(PATH_TO_MODEL);
 
+    #[cfg(feature = "std")]
     println!("Beginning training...");
 
     let mut score = 0.0;
     let mut i = 0u128;
 
     while score != 100.0 {
-        let loss = model.fit(&dataset, 10000000);
+        #[cfg_attr(not(feature = "std"), allow(unused_variables))]
+        let loss = model.fit(&dataset, 10000000, decay_lr);
 
+        #[cfg(feature = "std")]
         println!(
-            "\n=== BATCH {:?} ===\nTRAINING: loss={:?}, lr={:?}",
+            "\n=== EPOCH {:?} ===\nTRAINING: loss={:?}, lr={:?}",
             i,
             loss,
             model.get_lr()
@@ -51,9 +55,10 @@ fn main() {
 
             score = eval.score;
 
+            #[cfg(feature = "std")]
             println!(
-                "TESTING: loss={:?}, accuracy={:?}%, score={:?}%",
-                eval.loss, eval.accuracy, score
+                "TESTING: loss={:?}, acc={:?}%, score={:?}%",
+                eval.loss, eval.acc, score
             );
 
             // model.save(PATH_TO_MODEL).unwrap();
@@ -62,6 +67,7 @@ fn main() {
         i += 1;
     }
 
-    println!("model reached 100% accuracy");
+    #[cfg(feature = "std")]
+    println!("model reached 100% acc");
     // model.save(PATH_TO_MODEL).unwrap();
 }

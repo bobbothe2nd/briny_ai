@@ -64,6 +64,43 @@ pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
     super::cpu::cross_entropy_loss(prediction, target)
 }
 
+/// Performs the cross entropy loss function, ignoring zeroed timesteps and dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", feature = "dyntensor"))]
+pub fn cross_entropy_nonzero_loss<'a>(
+    prediction: &'a WithGrad<Tensor<TensorFloat>>,
+    target: &'a Tensor<TensorFloat>,
+) -> (
+    TensorFloat,
+    Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat> + 'a>,
+) {
+    super::cpu::cross_entropy_nonzero_loss(prediction, target)
+}
+/// Performs the cross entropy loss function, ignoring zeroed timesteps and dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
+pub fn cross_entropy_nonzero_loss<'a, const N: usize, const D: usize>(
+    prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
+    target: &'a Tensor<TensorFloat, N, D>,
+) -> (
+    TensorFloat,
+    Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat, N, D> + 'a>,
+) {
+    super::cpu::cross_entropy_nonzero_loss(prediction, target)
+}
+/// Performs the cross entropy loss function, ignoring zeroed timesteps and dispatching it among different backends.
+#[must_use]
+#[cfg(not(feature = "alloc"))]
+pub fn cross_entropy_nonzero_loss<'a, const N: usize, const D: usize>(
+    prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
+    target: &'a Tensor<TensorFloat, N, D>,
+) -> (
+    TensorFloat,
+    OpaqueFn<'a, TensorFloat, Tensor<TensorFloat, N, D>, Align8<128>>,
+) {
+    super::cpu::cross_entropy_nonzero_loss(prediction, target)
+}
+
 /// Performs matrix multiplication, dispatching it among different backends.
 #[must_use]
 #[cfg(feature = "dyntensor")]
@@ -365,7 +402,7 @@ pub fn relu<const N: usize, const D: usize>(
     super::cpu::relu(input)
 }
 
-/// Performs the softmax activation function, dispatching it among different backends.
+/// Performs the softmax function, dispatching it among different backends.
 #[must_use]
 #[cfg(all(feature = "alloc", feature = "dyntensor"))]
 pub fn softmax(
@@ -376,25 +413,161 @@ pub fn softmax(
 ) {
     super::cpu::softmax(input)
 }
-/// Performs the softmax activation function, dispatching it among different backends.
+/// Performs the softmax function, dispatching it among different backends.
 #[must_use]
 #[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
-pub fn softmax<const N: usize, const D: usize>(
+pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N1, D>>,
+) -> (
+    Tensor<TensorFloat, N2, D>,
+    Box<dyn Fn(Tensor<TensorFloat, N2, D>) -> Tensor<TensorFloat, N1, D> + '_>,
+) {
+    super::cpu::softmax(input)
+}
+/// Performs the softmax function, dispatching it among different backends.
+#[must_use]
+#[cfg(not(feature = "alloc"))]
+pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N1, D>>,
+) -> (
+    Tensor<TensorFloat, N2, D>,
+    OpaqueFn<'_, Tensor<TensorFloat, N2, D>, Tensor<TensorFloat, N1, D>, Align8<128>>,
+) {
+    super::cpu::softmax(input)
+}
+
+/// Performs the sigmoid activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", feature = "dyntensor"))]
+pub fn sigmoid(
+    input: &WithGrad<Tensor<TensorFloat>>,
+) -> (
+    Tensor<TensorFloat>,
+    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+) {
+    super::cpu::sigmoid(input)
+}
+/// Performs the sigmoid activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
+pub fn sigmoid<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
     Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
 ) {
-    super::cpu::softmax(input)
+    super::cpu::sigmoid(input)
 }
-/// Performs the softmax activation function, dispatching it among different backends.
+/// Performs the sigmoid activation function, dispatching it among different backends.
 #[must_use]
 #[cfg(not(feature = "alloc"))]
-pub fn softmax<const N: usize, const D: usize>(
+pub fn sigmoid<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
     OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
 ) {
-    super::cpu::softmax(input)
+    super::cpu::sigmoid(input)
+}
+
+/// Performs the GELU activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", feature = "dyntensor"))]
+pub fn gelu(
+    input: &WithGrad<Tensor<TensorFloat>>,
+) -> (
+    Tensor<TensorFloat>,
+    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+) {
+    super::cpu::gelu(input)
+}
+/// Performs the GELU activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
+pub fn gelu<const N: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+) -> (
+    Tensor<TensorFloat, N, D>,
+    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+) {
+    super::cpu::gelu(input)
+}
+/// Performs the GELU activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(not(feature = "alloc"))]
+pub fn gelu<const N: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+) -> (
+    Tensor<TensorFloat, N, D>,
+    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+) {
+    super::cpu::gelu(input)
+}
+
+/// Performs the Swish (`SiLU`) activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", feature = "dyntensor"))]
+pub fn swish(
+    input: &WithGrad<Tensor<TensorFloat>>,
+) -> (
+    Tensor<TensorFloat>,
+    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+) {
+    super::cpu::swish(input)
+}
+/// Performs the Swish (`SiLU`) activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
+pub fn swish<const N: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+) -> (
+    Tensor<TensorFloat, N, D>,
+    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+) {
+    super::cpu::swish(input)
+}
+/// Performs the Swish (`SiLU`) activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(not(feature = "alloc"))]
+pub fn swish<const N: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+) -> (
+    Tensor<TensorFloat, N, D>,
+    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+) {
+    super::cpu::swish(input)
+}
+
+/// Performs the `tanh` activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", feature = "dyntensor"))]
+pub fn tanh(
+    input: &WithGrad<Tensor<TensorFloat>>,
+) -> (
+    Tensor<TensorFloat>,
+    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+) {
+    super::cpu::tanh(input)
+}
+/// Performs the `tanh` activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
+pub fn tanh<const N: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+) -> (
+    Tensor<TensorFloat, N, D>,
+    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+) {
+    super::cpu::tanh(input)
+}
+/// Performs the `tanh` activation function, dispatching it among different backends.
+#[must_use]
+#[cfg(not(feature = "alloc"))]
+pub fn tanh<const N: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+) -> (
+    Tensor<TensorFloat, N, D>,
+    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+) {
+    super::cpu::tanh(input)
 }
