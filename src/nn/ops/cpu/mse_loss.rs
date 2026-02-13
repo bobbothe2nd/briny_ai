@@ -108,11 +108,37 @@ pub fn mse_loss<'a, const N: usize, const D: usize>(
 
     // backward closure
     let back = move |grad_output: TensorFloat| {
-        let mut grad = [0.0; N];
+        let mut grad = {
+            #[cfg(feature = "no_stack")]
+            {
+                alloc::vec![0.0; N]
+            }
+            #[cfg(not(feature = "no_stack"))]
+            {
+                [0.0; N]
+            }
+        };
+
         for i in 0..N {
             grad[i] = 2.0 * (pred_data[i] - target_data[i]) * grad_output / n;
         }
-        Tensor::new(shape, &grad)
+
+        {
+            #[cfg(feature = "no_stack")]
+            {
+                use crate::nn::tensors::VecTensor;
+
+                unsafe {
+                    VecTensor::from_vec(shape, grad)
+                        .into_tensor()
+                        .unwrap_unchecked()
+                }
+            }
+            #[cfg(not(feature = "no_stack"))]
+            {
+                Tensor::new(shape, &grad)
+            }
+        }
     };
 
     (loss, Box::new(back))

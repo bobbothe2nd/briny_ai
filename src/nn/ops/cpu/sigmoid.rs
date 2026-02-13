@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use super::exp;
 use crate::nn::{
     tensors::{Tensor, WithGrad},
@@ -11,7 +13,7 @@ use alloc::vec;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 #[cfg(not(feature = "alloc"))]
-use box_closure::{Align8, OpaqueFn};
+use box_closure::{Align8, OpaqueFnOnce};
 
 /// Performs Sigmoid activation.
 #[must_use]
@@ -20,18 +22,18 @@ pub fn sigmoid(
     input: &WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
 ) {
     let shape = input.get_value().shape();
     let input_data = input.get_value().data();
 
-    let mut out_data = vec![TensorFloat::default(); input_data.len()];
+    let mut out_data = vec![0.0; input_data.len()];
 
     out_data
         .iter_mut()
         .zip(input_data.iter())
         .for_each(|(y, &x)| {
-            *y = TensorFloat::from(1.0) / (TensorFloat::from(1.0) + exp(-x));
+            *y = 1.0 / (1.0 + exp(-x));
         });
 
     let out = Tensor::new(shape, &out_data);
@@ -40,13 +42,13 @@ pub fn sigmoid(
         let y_saved = out_data;
         move |grad_output: Tensor<TensorFloat>| {
             let dy = grad_output.data();
-            let mut grad = vec![TensorFloat::default(); dy.len()];
+            let mut grad = vec![0.0; dy.len()];
 
             grad.iter_mut()
                 .zip(y_saved.iter())
                 .zip(dy.iter())
                 .for_each(|((g, &y), &dyi)| {
-                    *g = dyi * y * (TensorFloat::from(1.0) - y);
+                    *g = dyi * y * (1.0 - y);
                 });
 
             Tensor::new(shape, &grad)
@@ -59,43 +61,40 @@ pub fn sigmoid(
 /// Performs Sigmoid activation.
 #[must_use]
 #[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
-pub fn sigmoid<const N: usize, const D: usize>(
-    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+pub fn sigmoid<const N1: usize, const N2: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N1, D>>,
 ) -> (
-    Tensor<TensorFloat, N, D>,
-    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+    Tensor<TensorFloat, N2, D>,
+    Box<dyn FnOnce(Tensor<TensorFloat, N2, D>) -> Tensor<TensorFloat, N1, D> + '_>,
 ) {
     use tensor_optim::ConstTensorOps;
 
     let shape: &[usize; D] = input.get_value().shape_array();
     let input_data = input.get_value().data();
 
-    let mut out_data = [TensorFloat::default(); N];
+    let mut out_data = [0.0; N2];
 
     out_data
         .iter_mut()
         .zip(input_data.iter())
         .for_each(|(y, &x)| {
-            *y = TensorFloat::from(1.0) / (TensorFloat::from(1.0) + exp(-x));
+            *y = 1.0 / (1.0 + exp(-x));
         });
 
     let out = Tensor::new(shape, &out_data);
 
-    let back = {
-        let y_saved = out_data;
-        move |grad_output: Tensor<TensorFloat, N, D>| {
-            let dy = grad_output.data();
-            let mut grad = [TensorFloat::default(); N];
+    let back = move |grad_output: Tensor<TensorFloat, N2, D>| {
+        let dy = grad_output.data();
+        let mut grad = [0.0; N1];
 
-            grad.iter_mut()
-                .zip(y_saved.iter())
-                .zip(dy.iter())
-                .for_each(|((g, &y), &dyi)| {
-                    *g = dyi * y * (TensorFloat::from(1.0) - y);
-                });
+        grad.iter_mut()
+            .zip(out_data.iter())
+            .zip(dy.iter())
+            .for_each(|((g, &y), &dyi)| {
+                *g = dyi * y * (1.0 - y);
+            });
 
-            Tensor::new(shape, &grad)
-        }
+        Tensor::new(shape, &grad)
     };
 
     (out, Box::new(back))
@@ -104,41 +103,41 @@ pub fn sigmoid<const N: usize, const D: usize>(
 /// Performs Sigmoid activation.
 #[must_use]
 #[cfg(not(feature = "alloc"))]
-pub fn sigmoid<const N: usize, const D: usize>(
-    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+pub fn sigmoid<const N1: usize, const N2: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N1, D>>,
 ) -> (
-    Tensor<TensorFloat, N, D>,
-    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+    Tensor<TensorFloat, N2, D>,
+    OpaqueFnOnce<'_, Tensor<TensorFloat, N2, D>, Tensor<TensorFloat, N1, D>, Align8<128>>,
 ) {
     use tensor_optim::ConstTensorOps;
 
     let shape: &[usize; D] = input.get_value().shape_array();
     let input_data = input.get_value().data();
 
-    let mut out_data = [TensorFloat::default(); N];
+    let mut out_data = [0.0; N2];
 
     out_data
         .iter_mut()
         .zip(input_data.iter())
         .for_each(|(y, &x)| {
-            *y = TensorFloat::from(1.0) / (TensorFloat::from(1.0) + exp(-x));
+            *y = 1.0 / (1.0 + exp(-x));
         });
 
     let out = Tensor::new(shape, &out_data);
 
-    let back = move |grad_output: Tensor<TensorFloat, N, D>| {
+    let back = move |grad_output: Tensor<TensorFloat, N2, D>| {
         let dy = grad_output.data();
-        let mut grad = [TensorFloat::default(); N];
+        let mut grad = [0.0; N1];
 
         grad.iter_mut()
             .zip(out_data.iter())
             .zip(dy.iter())
             .for_each(|((g, &y), &dyi)| {
-                *g = dyi * y * (TensorFloat::from(1.0) - y);
+                *g = dyi * y * (1.0 - y);
             });
 
         Tensor::new(shape, &grad)
     };
 
-    (out, OpaqueFn::new(back))
+    (out, OpaqueFnOnce::new(back))
 }

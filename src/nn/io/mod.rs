@@ -45,21 +45,16 @@
 //! - Maximum 255 tensors per file (due to `u8` count limit)
 //! - No per-tensor metadata (names, dtypes, etc.)
 
-#[cfg(feature = "std")]
-use crate::nn::IntermediateFp;
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+
 use crate::nn::tensors::TensorGrad;
+use crate::nn::IntermediateFp;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
-use briny::{
-    raw::{from_bytes_unaligned, slice_to_bytes},
-    traits::Pod,
-};
-#[cfg(feature = "std")]
-use Hasherfast::Hasher;
+use briny::traits::Pod;
 #[cfg(feature = "std")]
 use std::fs::File;
-#[cfg(feature = "std")]
-use std::io::{self, BufWriter, Write};
 use tensor_optim::TensorOps;
 
 #[cfg(feature = "alloc")]
@@ -67,12 +62,12 @@ use crate::nn::tensors::VecTensor;
 #[cfg(feature = "std")]
 use std::io::{BufReader, Read};
 
+#[cfg(feature = "std")]
 mod versions;
 
 /// The original BPAT header.
 ///
-/// Used on `briny_ai` `v0.1.0`-`v0.2.2`. This version does not need
-/// `std`, but still requires `alloc`.
+/// Used on `briny_ai` `v0.1.0`-`v0.2.2`.
 ///
 /// # Format
 ///
@@ -89,9 +84,9 @@ mod versions;
 /// ```
 pub const BPAT_MAGIC_V0: [u8; 4] = *b"bpat";
 
-/// The second BPAT header.
+/// The first BPAT header with checksums.
 ///
-/// Created on `briny_ai` `v0.3.0`. This version requires `std`.
+/// Created on `briny_ai` `v0.3.0`.
 ///
 /// # Format
 ///
@@ -101,27 +96,32 @@ pub const BPAT_MAGIC_V0: [u8; 4] = *b"bpat";
 /// ┌──────────────┬────────────────────────────┬────────────────────┐
 /// │ Header       │ Tensor N .. N+1 .. N+2 ..  │ Checksum           │
 /// ├──────────────┼────────────────────────────┼────────────────────┤
-/// │ `bpat`       │ u64: ndim                  │ u32: file checksum │
+/// │ `BPATv1\0\0` │ u64: ndim                  │ u32: file checksum │
 /// │ u8: count    │ [u64; ndim] shape          │                    │
 /// │              │ [f64; prod(shape)] data    │                    │
 /// │              │ u32: checksum              │                    │
 /// └──────────────┴────────────────────────────┴────────────────────┘
 /// ```
-///
-/// It also is the first format to include
 pub const BPAT_MAGIC_V1: [u8; 8] = *b"BPATv1\0\0";
 
-/// A proposed BPAT header.
+/// The most compact BPAT header.
 ///
-/// Expected to be created in a later version of `briny_ai`.
+/// Created on `briny_ai` `v0.6.0`.
 ///
 /// # Format
 ///
-/// This format would not require `std` or `alloc` and would be
-/// usable on any platform. It would really be a "portable" tensor
-/// format. It is exected that it will be extremely similar to BPAT
-/// v0, perhaps with slight adjustments for validation and ease of
-/// interpretation making it less compact.
+/// This version looks like this:
+///
+/// ```text
+/// ┌──────────────┬────────────────────────────┬────────────────────┐
+/// │ Header       │ Tensor N .. N+1 .. N+2 ..  │ Checksum           │
+/// ├──────────────┼────────────────────────────┼────────────────────┤
+/// │ `BPATv1m\0`  │ u32: ndim                  │ u32: file checksum │
+/// │ u8: count    │ [u32; ndim] shape          │                    │
+/// │              │ [f32; prod(shape)] data    │                    │
+/// │              │ u32: checksum              │                    │
+/// └──────────────┴────────────────────────────┴────────────────────┘
+/// ```
 pub const BPAT_MAGIC_V1_MICRO: [u8; 8] = *b"BPATv1m\0";
 
 /// An enumerated header dispatching BPAT formats.
@@ -132,235 +132,132 @@ pub enum BpatHeader {
 
     /// A format that guarantees data integrity.
     BpatV1,
+
+    /// A short and efficient format.
+    BpatV1M,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for BpatHeader {
     fn default() -> Self {
         #[cfg(feature = "std")]
         {
-            BpatHeader::BpatV1
+            Self::BpatV1
         }
         #[cfg(not(feature = "std"))]
         {
-            BpatHeader::BpatV0
+            Self::BpatV0
         }
     }
 }
 
+/// Analysis of an error during tensor serialization
 #[derive(Debug)]
 pub struct SerialTensorError {
+    /// The type of error.
     pub kind: SerialTensorErrorKind,
+    /// The attached message.
     pub msg: &'static str,
 }
 
+/// The type of error in tensor serialization.
 #[derive(Debug)]
 pub enum SerialTensorErrorKind {
+    /// Bad integrity: e.g. mismatched checksums.
     IntegrityUnverified,
+
+    /// Invalid data: e.g. shape product != data len
     InvalidData,
+
+    /// Invalid header: e.g. not valid `bpat` signature
     InvalidHeader,
+
+    /// Invalid path: e.g. no file exists
     InvalidPath,
 }
 
 /// Saves the given tensors to a file.
-#[cfg(feature = "std")]
+///
+/// # Errors
+///
+/// Failure conditions are as follows:
+///
+/// - The `std` feature is disabled
+/// - The tensors are invalid
+/// - The file path is invalid
+#[cfg_attr(not(feature = "std"), allow(clippy::missing_const_for_fn))]
 pub fn save_tensors<T: TensorGrad<U> + TensorOps<U>, U: Pod + Copy + IntermediateFp>(
     path: &str,
     tensors: &[T],
     header: BpatHeader,
 ) -> Result<(), SerialTensorError> {
-    match header {
-        BpatHeader::BpatV0 => {
-            versions::v0::save_tensors(path, tensors)
+    #[cfg(feature = "std")]
+    {
+        match header {
+            BpatHeader::BpatV0 => versions::v0::save_tensors(path, tensors),
+            BpatHeader::BpatV1 => versions::v1::save_tensors(path, tensors),
+            BpatHeader::BpatV1M => versions::v1m::save_tensors(path, tensors),
         }
-        BpatHeader::BpatV1 => {
-            versions::v1::save_tensors(path, tensors)
-        }
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        Err(SerialTensorError {
+            kind: SerialTensorErrorKind::InvalidPath,
+            msg: "I/O disabled",
+        })
     }
 }
 
 /// Loads tensors from a file.
-#[cfg(feature = "std")]
-pub fn load_tensors<T: Copy + Pod + IntermediateFp>(path: &str) -> Result<Vec<VecTensor<T>>, SerialTensorError> {
-    let mut file = BufReader::new(File::open(path)?);
-    let file_start = [0; 8];
-    file.read_exact(&mut file_start).map_err(|_| SerialTensorError {
-        kind: SerialTensorErrorKind::InvalidHeader,
-        msg: "header not found",
-    })?;
-    let header = if file_start == BPAT_MAGIC_V1 {
-        BpatHeader::BpatV1
-    } else if file_start.starts_with(&BPAT_MAGIC_V0) {
-        BpatHeader::BpatV0
-    } else {
-        return Err(SerialTensorError {
-            kind: SerialTensorErrorKind::InvalidHeader,
-            msg: "invalid header",
-        });
-    };
-    return match header {
-        BpatHeader::BpatV0 => {
-            versions::v0::load_tensors(path)
+///
+/// # Errors
+///
+/// Returns a [`SerialTensorError`] on failure to load tensors.
+///
+/// - The file exists
+/// - The file is in `bpat` format
+/// - The file is not corrupted
+/// - The `std` feature is enabled
+#[cfg(feature = "alloc")]
+#[cfg_attr(not(feature = "std"), allow(clippy::missing_const_for_fn))]
+pub fn load_tensors<T: Copy + Pod + IntermediateFp>(
+    path: &str,
+) -> Result<Vec<VecTensor<T>>, SerialTensorError> {
+    #[cfg(feature = "std")]
+    {
+        let mut file = BufReader::new(File::open(path).map_err(|_| SerialTensorError {
+            kind: SerialTensorErrorKind::InvalidPath,
+            msg: "no such file exists",
+        })?);
+        let mut file_start = [0; 8];
+        file.read_exact(&mut file_start)
+            .map_err(|_| SerialTensorError {
+                kind: SerialTensorErrorKind::InvalidHeader,
+                msg: "header not found",
+            })?;
+        let header = if file_start == BPAT_MAGIC_V1 {
+            BpatHeader::BpatV1
+        } else if file_start.starts_with(&BPAT_MAGIC_V0) {
+            BpatHeader::BpatV0
+        } else if file_start.starts_with(&BPAT_MAGIC_V1_MICRO) {
+            BpatHeader::BpatV1M
+        } else {
+            return Err(SerialTensorError {
+                kind: SerialTensorErrorKind::InvalidHeader,
+                msg: "invalid magic header",
+            });
+        };
+        match header {
+            BpatHeader::BpatV0 => versions::v0::load_tensors(path),
+            BpatHeader::BpatV1 => versions::v1::load_tensors(path),
+            BpatHeader::BpatV1M => versions::v1m::load_tensors(path),
         }
-        BpatHeader::BpatV1 => {
-            versions::v1::load_tensors(path)
-        }
-    };
-
-    let mut file = BufReader::new(File::open(path)?);
-    let mut full_data = Vec::new();
-    file.read_to_end(&mut full_data)?;
-
-    if full_data.len() < BPAT_MAGIC_V1.len() + 8 + 4 {
-        return Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "file too small",
-        ));
     }
-
-    // Split the last 4 bytes as the file CRC
-    let (data, crc_bytes) = full_data.split_at(full_data.len() - 4);
-    let expected_crc = u32::from_le_bytes(crc_bytes.try_into().unwrap());
-
-    let mut hasher = Hasher::new();
-    hasher.update(data);
-    if hasher.finalize() != expected_crc {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "file checksum mismatch",
-        ));
+    #[cfg(not(feature = "std"))]
+    {
+        Err(SerialTensorError {
+            kind: SerialTensorErrorKind::InvalidPath,
+            msg: "I/O disabled",
+        })
     }
-
-    let mut offset = 0;
-
-    // Check file magic
-    if data[offset..offset + 8] != BPAT_MAGIC_V1 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad file magic"));
-    }
-    offset += 8;
-
-    // Read tensor count (u64)
-    if offset + 8 > data.len() {
-        return Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "missing tensor count",
-        ));
-    }
-    let count = usize::try_from(u64::from_le_bytes(
-        data[offset..offset + 8].try_into().unwrap(),
-    ))
-    .unwrap();
-    offset += 8;
-
-    let mut tensors = Vec::with_capacity(count);
-
-    for _ in 0..count {
-        let tensor_start = offset;
-
-        // Read ndim
-        if offset + 8 > data.len() {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "missing ndim"));
-        }
-        let ndim = usize::try_from(u64::from_le_bytes(
-            data[offset..offset + 8].try_into().unwrap(),
-        ))
-        .unwrap();
-        offset += 8;
-
-        // Read shape
-        let shape_bytes = ndim
-            .checked_mul(8)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "ndim overflow"))?;
-        if offset + shape_bytes > data.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "missing shape data",
-            ));
-        }
-
-        let shape: Vec<u64> = (0..ndim)
-            .map(|i| {
-                let start = offset + i * 8;
-                u64::from_le_bytes(data[start..start + 8].try_into().unwrap())
-            })
-            .collect();
-        offset += shape_bytes;
-
-        // Compute data length
-        let len_u64 = shape
-            .iter()
-            .try_fold(1u64, |acc, &x| acc.checked_mul(x))
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "shape overflow"))?;
-        let len = usize::try_from(len_u64)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "shape size too large"))?;
-
-        let elem_size = core::mem::size_of::<T>();
-        let data_bytes = len
-            .checked_mul(elem_size)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "data size overflow"))?;
-
-        if offset + data_bytes > data.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "missing tensor data",
-            ));
-        }
-
-        let raw_data = &data[offset..offset + data_bytes];
-        offset += data_bytes;
-
-        if offset + 4 > data.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "missing tensor checksum",
-            ));
-        }
-        let expected_tensor_crc = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
-        offset += 4;
-
-        let tensor_bytes = &data[tensor_start..offset - 4];
-        let mut crc = Hasher::new();
-        crc.update(tensor_bytes);
-        let actual_crc = crc.finalize();
-
-        if actual_crc != expected_tensor_crc {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "tensor checksum mismatch",
-            ));
-        }
-
-        let elem_size = core::mem::size_of::<T>();
-        if raw_data.len() % elem_size != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "data length mismatch",
-            ));
-        }
-
-        let elem_size = core::mem::size_of::<T>();
-        let tensor_vec: Vec<T> = raw_data
-            .chunks_exact(elem_size)
-            .map(|chunk| {
-                from_bytes_unaligned::<T>(chunk).map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "unaligned or invalid tensor data",
-                    )
-                })
-            })
-            .collect::<Result<_, _>>()?;
-
-        let shape_usize: Vec<usize> = shape
-            .into_iter()
-            .map(|d| {
-                usize::try_from(d).map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidData, "shape dimension too large")
-                })
-            })
-            .collect::<Result<_, _>>()?;
-
-        tensors.push(VecTensor::with_data(&shape_usize, &tensor_vec));
-    }
-
-    Ok(tensors)
 }

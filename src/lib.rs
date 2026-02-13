@@ -13,23 +13,24 @@
 //!   mean squared error, and stochastic gradient descent
 //! - **GPU Acceleration**: Optional `wgpu`-powered compute shaders for matrix ops
 
-#![warn(clippy::all, clippy::pedantic)]
-#![allow(
-    clippy::type_complexity,
-    clippy::many_single_char_names,
-    clippy::cast_possible_truncation,
-    clippy::similar_names,
-    clippy::cast_precision_loss,
-    clippy::unused_async,
-    clippy::unnecessary_cast,
-    clippy::too_many_lines,
-    clippy::manual_slice_size_calculation,
-    clippy::struct_field_names,
-    clippy::cast_lossless,
-    clippy::excessive_precision,
-    clippy::approx_constant
-)]
-#![deny(clippy::nursery, unused_must_use)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::many_single_char_names)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::similar_names)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::unused_async)]
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::manual_slice_size_calculation)]
+#![allow(clippy::struct_field_names)]
+#![allow(clippy::cast_lossless)]
+#![allow(clippy::excessive_precision)]
+#![allow(clippy::approx_constant)]
+#![cfg_attr(feature = "dyntensor", allow(clippy::useless_conversion))]
+#![warn(clippy::all)]
+#![warn(clippy::pedantic)]
+#![deny(clippy::nursery)]
+#![deny(unused_must_use)]
 #![forbid(unsafe_op_in_unsafe_fn)]
 #![forbid(missing_docs)]
 #![no_std]
@@ -40,6 +41,7 @@ extern crate alloc;
 extern crate std;
 
 // not meant to be acccessed outside the macro
+#[cfg(feature = "alloc")]
 pub mod macros;
 
 pub mod approx;
@@ -51,8 +53,13 @@ pub mod prelude {
 
     pub use crate::{
         backend::{get_backend, set_backend, Backend},
+        nn::io::BpatHeader,
         nn::tensors::{Flatten, TensorOps},
-        macros::{Dataset, test::TestEval, Context, adapt_lr, decay_lr},
+    };
+
+    #[cfg(feature = "alloc")]
+    pub use crate::{
+        macros::{adapt_lr, decay_lr, test::TestEval, Context, Dataset},
         static_model,
     };
 }

@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use crate::nn::{
     tensors::{Tensor, WithGrad},
     TensorFloat,
@@ -10,7 +12,7 @@ use alloc::vec;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 #[cfg(not(feature = "alloc"))]
-use box_closure::{Align8, OpaqueFn};
+use box_closure::{Align8, OpaqueFnOnce};
 
 #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
 use core::arch::x86_64::*;
@@ -39,11 +41,11 @@ pub fn relu(
     input: &WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
 ) {
     let shape = input.get_value().shape();
     let len = input.get_value().data().len();
-    let mut data = vec![TensorFloat::default(); len];
+    let mut data = vec![0.0; len];
 
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
     {
@@ -70,11 +72,7 @@ pub fn relu(
         data.iter_mut()
             .zip(input.get_value().data().iter())
             .for_each(|(y, &x)| {
-                *y = if x > TensorFloat::default() {
-                    x
-                } else {
-                    TensorFloat::default()
-                };
+                *y = if x > 0.0 { x } else { 0.0 };
             });
     }
 
@@ -82,7 +80,7 @@ pub fn relu(
     let input_data = input.get_value().data();
 
     let back = move |grad_output: Tensor<TensorFloat>| {
-        let mut grad = vec![TensorFloat::default(); grad_output.data().len()];
+        let mut grad = vec![0.0; grad_output.data().len()];
 
         grad.iter_mut()
             .zip(input_data.iter())
@@ -121,28 +119,24 @@ pub fn relu<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
 ) {
     use tensor_optim::ConstTensorOps;
 
     let shape: &[usize; D] = input.get_value().shape_array();
-    let mut data = [TensorFloat::default(); N];
+    let mut data = [0.0; N];
 
     data.iter_mut()
         .zip(input.get_value().data().iter())
         .for_each(|(y, &x)| {
-            *y = if x > TensorFloat::default() {
-                x
-            } else {
-                TensorFloat::default()
-            };
+            *y = if x > 0.0 { x } else { 0.0 };
         });
 
     let out = Tensor::new(shape, &data);
-    let input_data = input.get_value().data(); // &[TensorFloat; N]
+    let input_data = input.get_value().data();
 
     let back = move |grad_output: Tensor<TensorFloat, N, D>| {
-        let mut grad = [TensorFloat::default(); N];
+        let mut grad = [0.0; N];
 
         grad.iter_mut()
             .zip(input_data.iter())
@@ -181,28 +175,24 @@ pub fn relu<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+    OpaqueFnOnce<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
 ) {
     use tensor_optim::ConstTensorOps;
 
     let shape: &[usize; D] = input.get_value().shape_array();
-    let mut data = [TensorFloat::default(); N];
+    let mut data = [0.0; N];
 
     data.iter_mut()
         .zip(input.get_value().data().iter())
         .for_each(|(y, &x)| {
-            *y = if x > TensorFloat::default() {
-                x
-            } else {
-                TensorFloat::default()
-            };
+            *y = if x > 0.0 { x } else { 0.0 };
         });
 
     let out = Tensor::new(shape, &data);
     let input_data = input.get_value().data(); // &[TensorFloat; N]
 
     let back = move |grad_output: Tensor<TensorFloat, N, D>| {
-        let mut grad = [TensorFloat::default(); N];
+        let mut grad = [0.0; N];
 
         #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
         {
@@ -241,5 +231,5 @@ pub fn relu<const N: usize, const D: usize>(
         Tensor::new(shape, &grad)
     };
 
-    (out, OpaqueFn::new(back))
+    (out, OpaqueFnOnce::new(back))
 }

@@ -1,12 +1,12 @@
 [package]
 name = "briny_ai"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.83.0"
 description = "A tiny & efficient AI inference engine"
 license = "MIT"
 documentation = "https://docs.rs/briny_ai"
-keywords = ["autograd", "tensor", "machine-learning"]
+keywords = ["autograd", "tensor", "machine-learning", "neural-network", "ai"]
 categories = ["science", "mathematics", "data-structures", "no-std", "no-std::no-alloc"]
 repository = "https://github.com/bobbothe2nd/briny_ai"
 readme = "README.md"
@@ -21,44 +21,16 @@ debug = false
 opt-level = 3
 codegen-units = 1
 
-[[example]]
-name = "m-mnist"
-required-features = [
-    "std", "dyntensor",
-]
-
-[[example]]
-name = "m-xor"
-required-features = []
-
-[[example]]
-name = "xor"
-required-features = []
-
-[[example]]
-name = "char_rnn"
-required-features = []
-
-[[example]]
-name = "transformer"
-required-features = ["std"]
-
-[[test]]
-name = "core"
-required-features = []
-
 [features]
-
-# float type used
-f64 = [] # probably shouldn't use without alloc (closure size)
-
 # abstraction levels
 alloc = ["tensor_optim/alloc", "lazy_simd/alloc"] # no OS, but global allocator
 std = ["alloc", "lazy_simd/std", "dep:crc32fast"] # underlying OS exists
 
 # dynamically sized tensors
-# hint: do NOT enable this if you care about performance, memory efficiency, or portability
 dyntensor = ["alloc"]
+
+# allocate everything on the heap to minimize stack usage
+no_stack = ["alloc"]
 
 # tensor backends
 wgpu = ["dep:wgpu", "dep:lazy_static", "std"]
@@ -66,12 +38,16 @@ cuda = ["wgpu", "std"]
 
 [dependencies]
 briny = "0.4.0"
-lazy_simd = "0.1.1"
+lazy_simd = { path = "../lazy-simd" }
 box_closure = "0.1.0"
-tensor_optim =  "0.2.1"
+tensor_optim =  { path = "../SAFE/Projects/tensor_optim" }
+libm = "0.2.15"
 crc32fast = { version = "1.5.0", default-features = false, optional = true }
 lazy_static = { version = "1.5.0", default-features = false, optional = true }
-libm = "0.2.15"
+
+[dev-dependencies]
+rand = "0.9.1"
+rand_distr = "0.5.1"
 
 # Windows
 [target.'cfg(target_family = "windows")'.dependencies.wgpu]
@@ -118,6 +94,65 @@ features = [
 ]
 optional = true
 
-[dev-dependencies]
-rand = "0.9.1"
-rand_distr = "0.5.1"
+[[test]]
+name = "core"
+required-features = []
+
+[[example]]
+name = "m-mnist"
+required-features = [
+    "alloc", "std", "dyntensor",
+]
+
+[[example]]
+name = "m-xor"
+required-features = []
+
+[[example]]
+name = "xor"
+required-features = [
+    "alloc"
+]
+
+[[example]]
+name = "transformer"
+required-features = [
+    "alloc", "std"
+]
+
+[[example]]
+name = "time"
+required-features = [
+    "alloc", "std",
+]
+
+[[example]]
+name = "llm_size"
+required-features = [
+    "alloc", "std", "dyntensor"
+]
+
+[[example]]
+name = "small_lm_size"
+required-features = [
+    "alloc", "std", "dyntensor"
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs", "--generate-link-to-definition"]
+targets = [
+  "aarch64-apple-ios",
+  "aarch64-linux-android",
+  "wasm32-wasip1",
+  "x86_64-apple-darwin",
+  "x86_64-pc-windows-gnu",
+  "x86_64-pc-windows-msvc",
+  "x86_64-unknown-dragonfly",
+  "x86_64-unknown-freebsd",
+  "x86_64-unknown-illumos",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-netbsd",
+  "x86_64-unknown-openbsd",
+  "x86_64-unknown-hermit",
+]

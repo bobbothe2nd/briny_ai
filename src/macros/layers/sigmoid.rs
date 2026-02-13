@@ -1,77 +1,55 @@
-use core::marker::PhantomData;
-
 use alloc::boxed::Box;
 
 use crate::macros::optim::Optim;
+use core::marker::PhantomData;
 
-use super::{softmax, Backward, ClosureOnce, Layer, Tensor, TensorFloat, WithGrad};
+use super::{sigmoid, Backward, ClosureOnce, Layer, Tensor, TensorFloat, WithGrad};
 
-/// Defines a layer that uses softmax to propagate probability distributions.
-pub struct Softmax<const RANK: usize, const SIZE: usize, O> {
+/// Defines a layer that uses sigmoid to propagate probability distributions.
+pub struct Sigmoid<const RANK: usize, const SIZE: usize, O> {
     /// The shape of the layer.
     pub shape: [usize; RANK],
 
     /// The data of the layer.
     pub data: Box<[TensorFloat; SIZE]>,
 
-    /// The temperature of the softmax layer.
-    pub temp: f32,
-
     /// Unused: no weights.
     pub _optim: PhantomData<O>,
 }
 
-impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> Softmax<RANK, SIZE, O> {
+impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> Sigmoid<RANK, SIZE, O> {
     /// The amount of tensors in the layer.
     pub const TENSORS: usize = 0;
 
     /// Builds the structure into a compute layer.
     #[must_use]
-    pub fn build(self) -> SoftmaxLayer<RANK, SIZE, O> {
-        SoftmaxLayer {
-            temp: self.temp,
+    pub fn build(self) -> SigmoidLayer<RANK, SIZE, O> {
+        SigmoidLayer {
             optim: O::new(&self.shape),
         }
     }
 }
 
-/// A layer that uses softmax to propagate probability distributions.
-pub struct SoftmaxLayer<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> {
-    temp: f32,
+/// A layer that uses sigmoid to propagate probability distributions.
+pub struct SigmoidLayer<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> {
     optim: O,
 }
 
-impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SoftmaxLayer<RANK, SIZE, O> {
-    /// Gets the temperature of the layer.
-    #[must_use]
-    pub const fn get_temp_relative(&self, _: f32) -> f32 {
-        self.temp
-    }
-
-    /// Updates the temperature of the layer.
-    pub fn update_temp<F>(&mut self, f: F)
-    where
-        F: Fn(f32) -> f32,
-    {
-        self.temp = f(self.temp);
-    }
-}
-
 #[cfg(feature = "dyntensor")]
-impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SoftmaxLayer<RANK, SIZE, O> {
-    /// Forwards the softmax layer.
+impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SigmoidLayer<RANK, SIZE, O> {
+    /// Forwards the sigmoid layer.
     #[inline]
     #[must_use]
     pub fn forward<'a>(
         &'a self,
         input: &'a WithGrad<Tensor<RANK, 0>>,
     ) -> (Tensor<RANK, 0>, Backward<'a, RANK, 0, 0, 0>, [(); 1]) {
-        let (out, f) = softmax(input);
+        let (out, f) = sigmoid(input);
 
         (out, Backward::Unary(f), [(); 1])
     }
 
-    /// Differentiates the softmax layer with the provided closure.
+    /// Differentiates the sigmoid layer with the provided closure.
     #[inline]
     #[must_use]
     #[allow(clippy::unnecessary_wraps)]
@@ -87,15 +65,15 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SoftmaxLayer<RA
                 (grad_in, None)
             }
             _ => {
-                unreachable!("Softmax always has an unary closure");
+                unreachable!("Sigmoid always has an unary closure");
             }
         }
     }
 }
 
 #[cfg(not(feature = "dyntensor"))]
-impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SoftmaxLayer<RANK, SIZE, O> {
-    /// Forwards the softmax layer.
+impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SigmoidLayer<RANK, SIZE, O> {
+    /// Forwards the sigmoid layer.
     #[inline]
     #[must_use]
     pub fn forward<'a, const OUT_SIZE: usize>(
@@ -106,12 +84,12 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SoftmaxLayer<RA
         Backward<'a, RANK, OUT_SIZE, OUT_SIZE, SIZE>,
         [(); 1],
     ) {
-        let (out, f) = softmax(input);
+        let (out, f) = sigmoid(input);
 
         (out, Backward::Unary(f), [(); 1])
     }
 
-    /// Differentiates the softmax layer with the provided closure.
+    /// Differentiates the sigmoid layer with the provided closure.
     #[inline]
     #[must_use]
     #[allow(clippy::unnecessary_wraps)]
@@ -127,14 +105,14 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SoftmaxLayer<RA
                 (grad_in, None)
             }
             _ => {
-                unreachable!("Softmax always has an unary closure");
+                unreachable!("Sigmoid always has an unary closure");
             }
         }
     }
 }
 
 impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> Layer<RANK, SIZE, 0>
-    for SoftmaxLayer<RANK, SIZE, O>
+    for SigmoidLayer<RANK, SIZE, O>
 {
     #[inline]
     fn optim_weights(

@@ -4,19 +4,24 @@ use briny_ai::nn::ops::cpu::{matmul, mse_loss, relu, sgd};
 use briny_ai::nn::tensors::*;
 
 #[test]
-#[cfg(all(feature = "std", feature = "dyntensor"))]
+#[cfg(all(feature = "std"))]
 fn bpat_save_and_load() {
-    // use briny_ai::nn::io::{load_tensors, save_tensors, BpatHeader};
+    use briny_ai::nn::io::{load_tensors, save_tensors, BpatHeader};
 
-    // let a = Tensor::new(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
-    // let b = Tensor::new(&[1, 4], &[7.0, 8.0, 9.0, 10.0]);
-    // let original = vec![a.clone(), b.clone()];
+    let a = Tensor::new(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    let b = Tensor::new(&[1, 4], &[7.0, 8.0, 9.0, 10.0]);
+    let original = vec![a.as_vectensor(), b.as_vectensor()];
 
-    // save_tensors("checkpoints/test/test_tensors.bpat", &original, BpatHeader::BpatV1).unwrap();
+    save_tensors(
+        "checkpoints/test/test_tensors.bpat",
+        &original,
+        BpatHeader::default(),
+    )
+    .unwrap();
 
-    // let loaded = load_tensors("checkpoints/test/test_tensors.bpat").unwrap();
+    let loaded = load_tensors("checkpoints/test/test_tensors.bpat").unwrap();
 
-    // assert_eq!(original, loaded);
+    assert_eq!(original, loaded);
 }
 
 #[test]

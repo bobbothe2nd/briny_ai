@@ -76,7 +76,7 @@ checksum = "f323c4cf80de41872956623f8e5f268360a71ce7cfa1275473db157d8bb2751c"
 
 [[package]]
 name = "briny_ai"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "box_closure",
  "briny",
@@ -402,9 +402,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "lazy_simd"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82000046b662d685c416b6a2fbb52439bf43fc8a115f53402de50f3dbec1165a"
+version = "0.3.0"
 dependencies = [
  "num-traits",
 ]
@@ -803,9 +801,7 @@ dependencies = [
 
 [[package]]
 name = "tensor_optim"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "453d1130315820f1ef1ffac992df77bbb20dd1ccf9cdde77adcd88946c68ea38"
+version = "0.3.0"
 dependencies = [
  "lazy_simd",
 ]

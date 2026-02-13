@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use super::exp;
 use crate::nn::{
     tensors::{Tensor, WithGrad},
@@ -11,7 +13,7 @@ use alloc::vec;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 #[cfg(not(feature = "alloc"))]
-use box_closure::{Align8, OpaqueFn};
+use box_closure::{Align8, OpaqueFnOnce};
 
 /// Softmax along the last axis of an arbitrary-rank tensor.
 #[must_use]
@@ -20,7 +22,7 @@ pub fn softmax(
     input: &WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
 ) {
     let shape = input.get_value().shape();
     let rank = shape.len();
@@ -28,7 +30,7 @@ pub fn softmax(
     let outer_size: usize = shape[..rank - 1].iter().product();
     let input_data = input.get_value().data();
 
-    let mut out_data = vec![TensorFloat::default(); input_data.len()];
+    let mut out_data = vec![0.0; input_data.len()];
 
     // Forward pass
     for i in 0..outer_size {
@@ -52,7 +54,7 @@ pub fn softmax(
         let out_clone = out_data;
         move |grad_output: Tensor<TensorFloat>| {
             let grad_data = grad_output.data();
-            let mut grad = vec![TensorFloat::default(); grad_data.len()];
+            let mut grad = vec![0.0; grad_data.len()];
 
             for i in 0..outer_size {
                 let offset = i * last_dim;
@@ -80,7 +82,7 @@ pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N1, D>>,
 ) -> (
     Tensor<TensorFloat, N2, D>,
-    Box<dyn Fn(Tensor<TensorFloat, N2, D>) -> Tensor<TensorFloat, N1, D> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat, N2, D>) -> Tensor<TensorFloat, N1, D> + '_>,
 ) {
     use tensor_optim::ConstTensorOps;
 
@@ -89,7 +91,16 @@ pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
     let last_dim = shape[D - 1];
     let outer_size: usize = shape[..D - 1].iter().product();
 
-    let mut out_data = [TensorFloat::default(); N2];
+    let mut out_data = {
+        #[cfg(feature = "no_stack")]
+        {
+            alloc::vec![0.0; N2]
+        }
+        #[cfg(not(feature = "no_stack"))]
+        {
+            [0.0; N2]
+        }
+    };
 
     for i in 0..outer_size {
         let offset = i * last_dim;
@@ -106,27 +117,59 @@ pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
         }
     }
 
-    let out = Tensor::new(shape, &out_data);
+    let out = {
+        #[cfg(feature = "no_stack")]
+        {
+            Tensor::new(shape, unsafe {
+                out_data.as_slice().try_into().unwrap_unchecked()
+            })
+        }
+        #[cfg(not(feature = "no_stack"))]
+        {
+            Tensor::new(shape, &out_data)
+        }
+    };
 
-    let back = {
-        let out_clone = out_data;
-        move |grad_output: Tensor<TensorFloat, N2, D>| {
-            let grad_data = grad_output.data();
-            let mut grad = [TensorFloat::default(); N1];
+    let back = move |grad_output: Tensor<TensorFloat, N2, D>| {
+        let grad_data = grad_output.data();
+        let mut grad = {
+            #[cfg(feature = "no_stack")]
+            {
+                alloc::vec![0.0; N1]
+            }
+            #[cfg(not(feature = "no_stack"))]
+            {
+                [0.0; N1]
+            }
+        };
 
-            for i in 0..outer_size {
-                let offset = i * last_dim;
-                let y = &out_clone[offset..offset + last_dim];
-                let dy = &grad_data[offset..offset + last_dim];
+        for i in 0..outer_size {
+            let offset = i * last_dim;
+            let y = &out_data[offset..offset + last_dim];
+            let dy = &grad_data[offset..offset + last_dim];
 
-                let dot: TensorFloat = y.iter().zip(dy.iter()).map(|(&yi, &dyi)| yi * dyi).sum();
+            let dot: TensorFloat = y.iter().zip(dy.iter()).map(|(&yi, &dyi)| yi * dyi).sum();
 
-                for j in 0..last_dim {
-                    grad[offset + j] = y[j] * (dy[j] - dot);
+            for j in 0..last_dim {
+                grad[offset + j] = y[j] * (dy[j] - dot);
+            }
+        }
+
+        {
+            #[cfg(feature = "no_stack")]
+            {
+                use crate::nn::tensors::VecTensor;
+
+                unsafe {
+                    VecTensor::from_vec(shape, grad)
+                        .into_tensor()
+                        .unwrap_unchecked()
                 }
             }
-
-            Tensor::new(shape, &grad)
+            #[cfg(not(feature = "no_stack"))]
+            {
+                Tensor::new(shape, &grad)
+            }
         }
     };
 
@@ -140,7 +183,7 @@ pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N1, D>>,
 ) -> (
     Tensor<TensorFloat, N2, D>,
-    OpaqueFn<'_, Tensor<TensorFloat, N2, D>, Tensor<TensorFloat, N1, D>, Align8<128>>,
+    OpaqueFnOnce<'_, Tensor<TensorFloat, N2, D>, Tensor<TensorFloat, N1, D>, Align8<128>>,
 ) {
     use tensor_optim::ConstTensorOps;
 
@@ -149,7 +192,7 @@ pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
     let last_dim = shape[D - 1];
     let outer_size: usize = shape[..D - 1].iter().product();
 
-    let mut out_data = [TensorFloat::default(); N2];
+    let mut out_data = [0.0; N2];
 
     for i in 0..outer_size {
         let offset = i * last_dim;
@@ -171,7 +214,7 @@ pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
     let back = {
         move |grad_output: Tensor<TensorFloat, N2, D>| {
             let grad_data = grad_output.data();
-            let mut grad = [TensorFloat::default(); N1];
+            let mut grad = [0.0; N1];
 
             for i in 0..outer_size {
                 let offset = i * last_dim;
@@ -189,5 +232,5 @@ pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
         }
     };
 
-    (out, OpaqueFn::new(back))
+    (out, OpaqueFnOnce::new(back))
 }

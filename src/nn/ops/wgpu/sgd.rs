@@ -1,10 +1,11 @@
+#![allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
+
 use super::{GpuFailure, GPU_CONTEXT, SGD_BIND_GROUP_LAYOUT, SGD_PIPELINE};
 use crate::nn::{
     tensors::{Tensor, WithGrad},
     TensorFloat,
 };
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 use briny::raw::{slice_from_bytes, slice_to_bytes};
 use core::sync::atomic::{AtomicBool, Ordering};
 use tensor_optim::TensorOps;
@@ -26,8 +27,9 @@ use wgpu::util::DeviceExt;
 /// - `false` on GPU execution failure
 #[cfg(feature = "dyntensor")]
 pub fn wgpu_sgd(w: &mut WithGrad<Tensor<TensorFloat>>, lr: TensorFloat) -> bool {
-    let weights_data = w.get_value().data();
-    let grads_data = w.get_grad().data();
+    let (weights, grads) = w.split_mut();
+    let weights_data = weights.data_mut();
+    let grads_data = grads.data_mut();
 
     // validate lengths
     if weights_data.is_empty()
@@ -37,24 +39,9 @@ pub fn wgpu_sgd(w: &mut WithGrad<Tensor<TensorFloat>>, lr: TensorFloat) -> bool 
         return false;
     }
 
-    // convert f64 to f32 vectors (minimal allocations: one for weights, one for grads)
-    let mut weights_f32: Vec<f32> = weights_data.iter().map(|&x| x as f32).collect();
-    let mut grads_f32: Vec<f32> = grads_data.iter().map(|&x| x as f32).collect();
-
     // run the GPU shader (async wrapped by pollster)
-    if super::block_on_gpu(run_sgd_shader(&mut weights_f32, &mut grads_f32, lr as f32)).is_err() {
+    if super::block_on_gpu(run_sgd_shader(weights_data, grads_data, lr)).is_err() {
         return false;
-    }
-
-    let (weights_tensor, grads_tensor) = w.split_mut();
-    let weights_mut = weights_tensor.data_mut();
-    let grads_mut = grads_tensor.data_mut();
-
-    for (dst, &src) in weights_mut.iter_mut().zip(weights_f32.iter()) {
-        *dst = TensorFloat::from(src);
-    }
-    for (dst, &src) in grads_mut.iter_mut().zip(grads_f32.iter()) {
-        *dst = TensorFloat::from(src);
     }
 
     true
@@ -78,8 +65,9 @@ pub fn wgpu_sgd<const N: usize, const D: usize>(
     w: &mut WithGrad<Tensor<TensorFloat, N, D>>,
     lr: TensorFloat,
 ) -> bool {
-    let weights_data = w.get_value().data();
-    let grads_data = w.get_grad().data();
+    let (weights, grads) = w.split_mut();
+    let weights_data = weights.data_mut();
+    let grads_data = grads.data_mut();
 
     // validate lengths
     if weights_data.is_empty()
@@ -89,29 +77,15 @@ pub fn wgpu_sgd<const N: usize, const D: usize>(
         return false;
     }
 
-    // convert f64 to f32 vectors (minimal allocations: one for weights, one for grads)
-    let mut weights_f32: Vec<f32> = weights_data.iter().map(|&x| x as f32).collect();
-    let mut grads_f32: Vec<f32> = grads_data.iter().map(|&x| x as f32).collect();
-
     // run the GPU shader (async wrapped by pollster)
-    if super::block_on_gpu(run_sgd_shader(&mut weights_f32, &mut grads_f32, lr as f32)).is_err() {
+    if super::block_on_gpu(run_sgd_shader(weights_data, grads_data, lr)).is_err() {
         return false;
-    }
-
-    let (weights_tensor, grads_tensor) = w.split_mut();
-    let weights_mut = weights_tensor.data_mut();
-    let grads_mut = grads_tensor.data_mut();
-
-    for (dst, &src) in weights_mut.iter_mut().zip(weights_f32.iter()) {
-        *dst = TensorFloat::from(src);
-    }
-    for (dst, &src) in grads_mut.iter_mut().zip(grads_f32.iter()) {
-        *dst = TensorFloat::from(src);
     }
 
     true
 }
 
+#[allow(clippy::unused_async)]
 async fn run_sgd_shader(weights: &mut [f32], grad: &mut [f32], lr: f32) -> Result<(), GpuFailure> {
     assert_eq!(weights.len(), grad.len());
     assert_eq!(weights.len() % 4, 0);

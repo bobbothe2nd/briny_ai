@@ -58,7 +58,7 @@ fn main() {
             let (z2, back2) = matmul(&a1_wrapped, &w2);
             let prediction = z2.with_grad();
 
-            // Loss
+            // loss
             let (loss, back_loss) = mse_loss(&prediction, &y);
             loss_accum += loss;
 
@@ -76,9 +76,6 @@ fn main() {
 
             let grads_w1 = dz1_w1.data().to_vec();
             let grads_w2 = dz2_w2.data().to_vec();
-
-            drop(back1);
-            drop(back2);
 
             // accumulate grads
             for (g, val) in w1.get_grad_mut().data_mut().iter_mut().zip(grads_w1) {
@@ -130,26 +127,27 @@ fn main() {
 
     #[cfg(feature = "std")]
     {
-        // use briny_ai::nn::io::BpatHeader;
+        use briny_ai::nn::io::BpatHeader;
+        use briny_ai::nn::tensors::TensorGrad;
 
-        // briny_ai::nn::io::save_tensors(
-        //     "checkpoints/m-xor/model.bpat",
-        //     &[w1.get_value().clone(), w2.get_value().clone()],
-        //     BpatHeader::BpatV1
-        // )
-        // .unwrap();
-        // println!("Model saved to checkpoints/m-xor/model.bpat");
+        briny_ai::nn::io::save_tensors(
+            "checkpoints/m-xor/model.bpat",
+            &[w1.get_value().clone(), w2.get_value().clone()],
+            BpatHeader::BpatV1,
+        )
+        .unwrap();
+        println!("Model saved to checkpoints/m-xor/model.bpat");
 
-        // let loaded =
-        //     briny_ai::nn::io::load_tensors::<TensorFloat>("checkpoints/m-xor/model.bpat").unwrap();
-        // println!("Loaded tensors:");
-        // for t in loaded {
-        //     println!(
-        //         "Shape: {:?}, First few vals: {:?}",
-        //         t.shape(),
-        //         &t.data()[..4.min(t.len())]
-        //     );
-        // }
+        let loaded =
+            briny_ai::nn::io::load_tensors::<TensorFloat>("checkpoints/m-xor/model.bpat").unwrap();
+        println!("Loaded tensors:");
+        for t in loaded {
+            println!(
+                "Shape: {:?}, First few vals: {:?}",
+                t.shape(),
+                &t.data()[..4.min(t.len())]
+            );
+        }
     }
 }
 
@@ -237,9 +235,6 @@ fn main() {
             let grads_w1 = dz1_w1.data().to_vec();
             let grads_w2 = dz2_w2.data().to_vec();
 
-            drop(back1);
-            drop(back2);
-
             // accumulate grads
             for (g, val) in w1.get_grad_mut().data_mut().iter_mut().zip(grads_w1) {
                 *g += val;
@@ -288,26 +283,26 @@ fn main() {
         }
     }
 
-    // #[cfg(feature = "std")]
-    // {
-    //     use briny_ai::nn::{io::BpatHeader, tensors::TensorGrad};
-    //     briny_ai::nn::io::save_tensors(
-    //         "checkpoints/m-xor/model.bpat",
-    //         &[w1.get_value().clone(), w2.get_value().clone()],
-    //         BpatHeader::BpatV1,
-    //     )
-    //     .unwrap();
-    //     println!("Model saved to checkpoints/m-xor/model.bpat");
-    //
-    //     let loaded =
-    //         briny_ai::nn::io::load_tensors::<TensorFloat>("checkpoints/m-xor/model.bpat").unwrap();
-    //     println!("Loaded tensors:");
-    //     for t in loaded {
-    //         println!(
-    //             "Shape: {:?}, First few vals: {:?}",
-    //             t.shape(),
-    //             &t.data()[..4.min(t.len())],
-    //         );
-    //     }
-    // }
+    #[cfg(feature = "std")]
+    {
+        use briny_ai::nn::{io::BpatHeader, tensors::TensorGrad};
+        briny_ai::nn::io::save_tensors(
+            "checkpoints/m-xor/model.bpat",
+            &[w1.get_value().clone(), w2.get_value().clone()],
+            BpatHeader::BpatV1,
+        )
+        .unwrap();
+        println!("Model saved to checkpoints/m-xor/model.bpat");
+
+        let loaded =
+            briny_ai::nn::io::load_tensors::<TensorFloat>("checkpoints/m-xor/model.bpat").unwrap();
+        println!("Loaded tensors:");
+        for t in loaded {
+            println!(
+                "Shape: {:?}, First few vals: {:?}",
+                t.shape(),
+                &t.data()[..4.min(t.len())],
+            );
+        }
+    }
 }

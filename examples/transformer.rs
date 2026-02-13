@@ -1,15 +1,20 @@
-#![cfg_attr(feature = "f64", allow(dead_code, unused))]
+use briny_ai::prelude::*;
 
-use core::mem::MaybeUninit;
-use briny_ai::prelude::{Context, Dataset, Flatten, TestEval, TensorOps, static_model};
+const PATH_TO_MODEL: &str = "checkpoints/transformer/model.bpat";
 
-const SEQ: usize = 9;
-const D_MODEL: usize = 12;
+const SEQ: usize = 8;
 const VOCAB: usize = 9;
+const D_MODEL: usize = 6;
+const D_FF: usize = D_MODEL * 4;
 
-const TOKENS: [[f32; VOCAB]; VOCAB] = [
-    THE, QUICK, BROWN, FOX, JUMPED, OVER, LAZY, DOG, STOP_SAMPLE,
-];
+const DEPTH: usize = 2;
+const PARAMETERS: usize =
+    (VOCAB * D_MODEL) + (DEPTH * ((4 * D_MODEL * D_MODEL) + (2 * D_MODEL * D_FF)));
+
+const CONTEXT_LIMIT: usize = 10;
+
+const TOKENS: [[f32; VOCAB]; VOCAB] =
+    [THE, QUICK, BROWN, FOX, JUMPED, OVER, LAZY, DOG, STOP_SAMPLE];
 const TOKENS_STR: [&str; VOCAB] = [
     "THE", "QUICK", "BROWN", "FOX", "JUMPED", "OVER", "LAZY", "DOG", "[eof]",
 ];
@@ -18,41 +23,58 @@ const TOKEN_POS: f32 = 0.9;
 const TOKEN_NEG: f32 = (1.0 - TOKEN_POS) / (VOCAB - 1) as f32;
 
 const PAD: [f32; VOCAB] = [0.0; VOCAB];
-const THE: [f32; VOCAB] = [TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG];
-const QUICK: [f32; VOCAB] = [TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG];
-const BROWN: [f32; VOCAB] = [TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG];
-const FOX: [f32; VOCAB] = [TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG];
-const JUMPED: [f32; VOCAB] = [TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG];
-const OVER: [f32; VOCAB] = [TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG];
-const LAZY: [f32; VOCAB] = [TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG];
-const DOG: [f32; VOCAB] = [TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG];
-const STOP_SAMPLE: [f32; VOCAB] = [TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS];
+const THE: [f32; VOCAB] = [
+    TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG,
+    TOKEN_NEG,
+];
+const QUICK: [f32; VOCAB] = [
+    TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG,
+    TOKEN_NEG,
+];
+const BROWN: [f32; VOCAB] = [
+    TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG,
+    TOKEN_NEG,
+];
+const FOX: [f32; VOCAB] = [
+    TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG,
+    TOKEN_NEG,
+];
+const JUMPED: [f32; VOCAB] = [
+    TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG,
+    TOKEN_NEG,
+];
+const OVER: [f32; VOCAB] = [
+    TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG, TOKEN_NEG,
+    TOKEN_NEG,
+];
+const LAZY: [f32; VOCAB] = [
+    TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS, TOKEN_NEG,
+    TOKEN_NEG,
+];
+const DOG: [f32; VOCAB] = [
+    TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_POS,
+    TOKEN_NEG,
+];
+const STOP_SAMPLE: [f32; VOCAB] = [
+    TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG, TOKEN_NEG,
+    TOKEN_POS,
+];
 
-const DATASET_COUNT: usize = 9;
-const DESIRED_LOSS: f32 = 1.2;
+const DATASET_COUNT: usize = 4;
+const DESIRED_LOSS: f32 = 0.3;
 
 const INPUTS: [[[f32; VOCAB]; SEQ]; DATASET_COUNT] = [
-    [PAD, PAD, PAD, PAD, PAD, PAD, PAD, PAD, THE],
-    [PAD, PAD, PAD, PAD, PAD, PAD, PAD, THE, QUICK],
-    [PAD, PAD, PAD, PAD, PAD, PAD, THE, QUICK, BROWN],
-    [PAD, PAD, PAD, PAD, PAD, THE, QUICK, BROWN, FOX],
-    [PAD, PAD, PAD, PAD, THE, QUICK, BROWN, FOX, JUMPED],
-    [PAD, PAD, PAD, THE, QUICK, BROWN, FOX, JUMPED, OVER],
-    [PAD, PAD, THE, QUICK, BROWN, FOX, JUMPED, OVER, THE],
-    [PAD, THE, QUICK, BROWN, FOX, JUMPED, OVER, THE, LAZY],
-    [THE, QUICK, BROWN, FOX, JUMPED, OVER, THE, LAZY, DOG],
+    [THE, QUICK, BROWN, FOX, JUMPED, OVER, THE, LAZY],
+    [QUICK, BROWN, FOX, JUMPED, OVER, THE, LAZY, DOG],
+    [DOG, JUMPED, PAD, PAD, PAD, PAD, PAD, PAD],
+    [JUMPED, OVER, PAD, PAD, PAD, PAD, PAD, PAD],
 ];
 
 const TARGETS: [[[f32; VOCAB]; SEQ]; DATASET_COUNT] = [
-    [PAD, PAD, PAD, PAD, PAD, PAD, PAD, THE, QUICK],
-    [PAD, PAD, PAD, PAD, PAD, PAD, THE, QUICK, BROWN],
-    [PAD, PAD, PAD, PAD, PAD, THE, QUICK, BROWN, FOX],
-    [PAD, PAD, PAD, PAD, THE, QUICK, BROWN, FOX, JUMPED],
-    [PAD, PAD, PAD, THE, QUICK, BROWN, FOX, JUMPED, OVER],
-    [PAD, PAD, THE, QUICK, BROWN, FOX, JUMPED, OVER, THE],
-    [PAD, THE, QUICK, BROWN, FOX, JUMPED, OVER, THE, LAZY],
-    [THE, QUICK, BROWN, FOX, JUMPED, OVER, THE, LAZY, DOG],
-    [QUICK, BROWN, FOX, JUMPED, OVER, THE, LAZY, DOG, STOP_SAMPLE],
+    [QUICK, BROWN, FOX, JUMPED, OVER, THE, LAZY, DOG],
+    [BROWN, FOX, JUMPED, OVER, THE, LAZY, DOG, STOP_SAMPLE],
+    [DOG, JUMPED, OVER, PAD, PAD, PAD, PAD, PAD],
+    [JUMPED, OVER, FOX, PAD, PAD, PAD, PAD, PAD],
 ];
 
 fn match_distr_tok(distr: &[f32; VOCAB]) -> [f32; VOCAB] {
@@ -76,10 +98,6 @@ fn tok_to_str(tok: &[f32; VOCAB]) -> &'static str {
 fn tok_stream_to_str(toks: &[[f32; VOCAB]]) -> String {
     let mut string = String::new();
     for tok in toks {
-        if tok.iter().all(|x| *x == 0.0) {
-            continue;
-        }
-
         string.push_str(tok_to_str(tok));
         string.push(' ');
     }
@@ -88,69 +106,64 @@ fn tok_stream_to_str(toks: &[[f32; VOCAB]]) -> String {
 }
 
 static_model!(
-    @loss cross_entropy_nonzero_loss
-    @optim sgd(0.001)
-    @model SeqTransformer
+    @loss cross_entropy_loss
+    @optim Adam(0.001)
+    @model SeqTransformer(model)
     {
-        InputLayer([VOCAB, SEQ]),
+        InputLayer([SEQ, VOCAB]),
         {
             // project vocab to features
-            dense0: Dense([D_MODEL, VOCAB]) => DenseLayer,
-            act0: Activation([D_MODEL, SEQ], Tanh) => ActivationLayer,
+            embed: Collapse([VOCAB, D_MODEL]) => CollapseLayer,
 
-            // mix features
-            dense1: Dense([D_MODEL, D_MODEL]) => DenseLayer,
-            act1: Activation([D_MODEL, SEQ], ReLU) => ActivationLayer,
+            // transformer 0
+            ln0: LayerNorm([1, D_MODEL]) => LayerNormLayer,
+            attn0: Residual([D_MODEL, D_MODEL], <CausalSelfAttention>) => ResidualLayer(a[SEQ, SEQ], [SEQ, D_MODEL]),
+            ln1: LayerNorm([1, D_MODEL]) => LayerNormLayer,
+            ff0: Residual([D_MODEL, D_FF], <FeedForward>, GELU) => ResidualLayer(a[SEQ, D_FF], [SEQ, D_MODEL]),
 
-            // grammar / sequence update
-            grammar: Collapse([SEQ, SEQ]) => CollapseLayer,
-            act2: Activation([D_MODEL, SEQ], GELU) => ActivationLayer,
+            // transformer 1
+            ln2: LayerNorm([1, D_MODEL]) => LayerNormLayer,
+            attn1: Residual([D_MODEL, D_MODEL], <CausalSelfAttention>) => ResidualLayer(a[SEQ, SEQ], [SEQ, D_MODEL]),
+            ln3: LayerNorm([1, D_MODEL]) => LayerNormLayer,
+            ff1: Residual([D_MODEL, D_FF], <FeedForward>, Swish) => ResidualLayer(a[SEQ, D_FF], [SEQ, D_MODEL]),
 
-            // alter through time series
-            attn0: Temporal([SEQ, SEQ]) => TemporalLayer([D_MODEL, SEQ]),
-            collapse: Collapse([SEQ, SEQ]) => CollapseLayer([D_MODEL, SEQ]),
-            attn1: Temporal([SEQ, SEQ]) => TemporalLayer([D_MODEL, SEQ]),
-            act3: Activation([D_MODEL, SEQ], Tanh) => ActivationLayer,
+            // final normalization
+            ln4: LayerNorm([1, D_MODEL]) => LayerNormLayer,
 
             // project features back
-            dense2: Dense([VOCAB, D_MODEL]) => DenseLayer,
-            soft: Softmax([VOCAB, SEQ](2.0, 0.5)) => SoftmaxLayer,
+            extract: Collapse([D_MODEL, VOCAB]) => CollapseLayer,
+            soft: Softmax([SEQ, VOCAB](1.5, 0.2)) => SoftmaxLayer,
         },
-        OutputLayer([VOCAB, SEQ]),
+        OutputLayer([SEQ, VOCAB]),
     }
 );
 
-#[cfg(feature = "f64")]
 fn main() {
-    println!("`SeqTransformer` not supported using `f64");
-}
+    let mut model = SeqTransformer::new(0.4);
 
-#[cfg(not(feature = "f64"))]
-fn main() {
-    let mut model = SeqTransformer::new(0.75);
+    println!("Loading Model\n {} Total Parameters", PARAMETERS);
+
+    if model.load(PATH_TO_MODEL).is_ok() {
+        println!(" Loaded Successfully");
+    } else {
+        println!(" Loading Failed");
+    }
 
     // training on "THE QUICK BROWN FOX JUMPED OVER THE LAZY DOG"
-    let mut datasets_maybe = MaybeUninit::<[Dataset<2, { VOCAB * SEQ }, 2, { VOCAB * SEQ }>; DATASET_COUNT]>::uninit();
-    for (i, (input, target)) in INPUTS.iter().zip(&TARGETS).enumerate() {
-        let dataset = Dataset::new(input, target);
-        unsafe {
-            datasets_maybe.as_mut_ptr().cast::<Dataset<2, { VOCAB * SEQ }, 2, { VOCAB * SEQ }>>().add(i).write(dataset);
-        }
-    }
-    let datasets = unsafe { datasets_maybe.assume_init() };
+    let datasets = Dataset::arr_of(INPUTS, TARGETS);
 
     println!("TRAINING:");
 
     let mut min_expected = 2.4;
     let mut b_i = 0;
     'training: while min_expected > DESIRED_LOSS {
-        println!(" BATCH {:?}:", b_i);
+        println!(" GROUP {:?}:", b_i);
 
         let mut i = 0;
         loop {
-            if i % 10000 == 0 {
+            if i % 1000 == 0 {
                 println!("  EPOCH {:?}:", i);
-                if i % 100000 == 0 {
+                if i % 10000 == 0 {
                     test(&model);
                 }
             }
@@ -180,11 +193,12 @@ fn main() {
             }
 
             if train_loss_high <= f32::EPSILON {
+                println!("  EPOCH {}:", i);
+                println!(
+                    "   training closed: model collapse (loss={:?})",
+                    train_loss_high
+                );
                 break 'training;
-            }
-
-            if i % 10000 == 0 {
-                println!("   TRAINING: loss=({:?}..{:?}), lr={:?}", train_loss_low, train_loss_high, model.get_lr());
             }
 
             let (low_acc, high_acc) = if eval_low.acc < eval_high.acc {
@@ -198,15 +212,33 @@ fn main() {
                 (eval_high.score, eval_low.score)
             };
 
-            if i % 10000 == 0 {
+            if eval_high.loss < min_expected {
+                println!("  EPOCH {}:", i);
+                println!(
+                    "   TRAINING: loss=({:?}..{:?}), lr={:?}",
+                    train_loss_low,
+                    train_loss_high,
+                    model.get_lr()
+                );
+                model.save(PATH_TO_MODEL, BpatHeader::BpatV1).unwrap();
                 println!(
                     "   TESTING: loss=({:?}..{:?}), acc=({:?}..{:?})%, score=({:?}..{:?})%",
                     eval_low.loss, eval_high.loss, low_acc, high_acc, low_score, high_score
                 );
-            }
-
-            if eval_high.loss <= min_expected {
+                println!("   batch closed: {:?} < {:?}", eval_high.loss, min_expected);
                 break;
+            } else if i % 1000 == 0 {
+                println!(
+                    "   TRAINING: loss=({:?}..{:?}), lr={:?}",
+                    train_loss_low,
+                    train_loss_high,
+                    model.get_lr()
+                );
+                model.save(PATH_TO_MODEL, BpatHeader::BpatV1).unwrap();
+                println!(
+                    "   TESTING: loss=({:?}..{:?}), acc=({:?}..{:?})%, score=({:?}..{:?})%",
+                    eval_low.loss, eval_high.loss, low_acc, high_acc, low_score, high_score
+                );
             }
 
             i += 1;
@@ -215,47 +247,74 @@ fn main() {
         b_i += 1;
     }
 
-    println!("\nTESTING:\n");
-
-    let mut idx = 0;
-    let text = [THE, PAD, PAD, PAD, PAD, PAD, PAD, PAD, PAD];
+    println!("FINAL EVALUATION:");
+    let text = [THE, PAD, PAD, PAD, PAD, PAD, PAD, PAD];
     let text_flat: [f32; VOCAB * SEQ] = text.flatten();
     let mut text_data = Context::from_parts([VOCAB, SEQ], text_flat);
-    let mut nested_context = text;
+    let mut nested_context = Vec::with_capacity(SEQ);
+    nested_context.push(THE);
+    let mut idx = 0;
     loop {
-        idx += 1;
-        let idx_scaled = idx * VOCAB;
         let sample = model.sample(&text_data);
         let next_tok = match_distr_tok(&sample[(sample.len() - VOCAB)..].try_into().unwrap());
-        println!("{:?} -> {:?}", &sample[(sample.len() - VOCAB)..], tok_to_str(&next_tok));
-        if next_tok == STOP_SAMPLE || idx >= SEQ {
+        println!(
+            "  {:?} -> {:?}",
+            &sample[(sample.len() - VOCAB)..],
+            tok_to_str(&next_tok)
+        );
+        if next_tok == STOP_SAMPLE {
+            break;
+        } else if idx > CONTEXT_LIMIT {
+            println!("  FORCE ABORT (LENGTH EXCEEDING LIMIT)");
             break;
         }
-        text_data.raw_mut().get_value_mut().data_mut()[idx_scaled..idx_scaled+VOCAB].copy_from_slice(&next_tok);
-        nested_context[idx] = next_tok;
+        let text_mut = text_data.raw_mut().get_value_mut().data_mut();
+        for i in 0..SEQ * VOCAB - 1 {
+            text_mut[i] = text_mut[i + 1];
+        }
+        text_mut[SEQ * (VOCAB - 1)..].copy_from_slice(&next_tok);
+        nested_context.push(next_tok);
+        idx += 1;
     }
-    println!("\n{}", tok_stream_to_str(&nested_context));
+    println!(" {}", tok_stream_to_str(&nested_context));
 }
 
-#[cfg(not(feature = "f64"))]
 fn test(model: &SeqTransformer) {
-    println!("   SAMPLES:");
-    let mut idx = 0;
-    let text = [THE, PAD, PAD, PAD, PAD, PAD, PAD, PAD, PAD];
+    print!("   SAMPLES:\n     ");
+    let text = [THE, PAD, PAD, PAD, PAD, PAD, PAD, PAD];
     let text_flat: [f32; VOCAB * SEQ] = text.flatten();
-    let mut text_data = Context::from_parts([VOCAB, SEQ], text_flat);
-    let mut nested_context = text;
+    let mut text_data = Context::from_parts([SEQ, VOCAB], text_flat);
+    let mut nested_context = Vec::with_capacity(SEQ);
+    nested_context.push(THE);
+    let mut idx = 0;
+    let mut overflow = 0;
     loop {
-        idx += 1;
-        let idx_scaled = idx * VOCAB;
-        let sample = model.sample(&text_data);
-        let next_tok = match_distr_tok(&sample[(sample.len() - VOCAB)..].try_into().unwrap());
-        println!("     {:?} -> {:?}", &sample[(sample.len() - VOCAB)..], tok_to_str(&next_tok));
-        if next_tok == STOP_SAMPLE || idx >= SEQ {
+        if overflow > CONTEXT_LIMIT {
+            println!("\n     FORCE ABORT (LENGTH EXCEEDING LIMIT)");
             break;
         }
-        text_data.raw_mut().get_value_mut().data_mut()[idx_scaled..idx_scaled+VOCAB].copy_from_slice(&next_tok);
-        nested_context[idx] = next_tok;
+
+        let sample = model.sample(&text_data);
+        let next_tok = match_distr_tok(&sample[(sample.len() - VOCAB)..].try_into().unwrap());
+
+        print!("{} ", tok_to_str(&next_tok));
+
+        if next_tok == STOP_SAMPLE {
+            break;
+        }
+        let text_mut = text_data.raw_mut().get_value_mut().data_mut();
+
+        idx += 1;
+        if idx >= SEQ {
+            idx -= 1;
+            overflow += 1;
+            for i in 0..SEQ * (VOCAB - 1) {
+                text_mut[i] = text_mut[i + 1];
+            }
+        }
+
+        text_mut[VOCAB * idx..VOCAB * (idx + 1)].copy_from_slice(&next_tok);
+        nested_context.push(next_tok);
     }
-    println!("    {}", tok_stream_to_str(&nested_context));
+    print!("\n");
 }

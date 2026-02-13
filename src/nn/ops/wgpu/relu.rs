@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use super::{vec, GpuFailure, GPU_CONTEXT, RELU_BIND_GROUP_LAYOUT, RELU_PIPELINE};
 use crate::nn::{
     tensors::{Tensor, TensorGrad, TensorOps, WithGrad},
@@ -37,27 +39,17 @@ pub fn wgpu_relu(
         return None;
     }
 
-    let data: Vec<f32> = input.get_value().data().iter().map(|&x| x as f32).collect();
+    let data = input.get_value().data();
     let mut output = vec![0.0f32; data.len()];
 
-    let result = super::block_on_gpu(run_relu_shader(&data, &mut output));
+    let result = super::block_on_gpu(run_relu_shader(data, &mut output));
     if result.is_err() {
         return None;
     }
 
     let output_tensor = Tensor::new(
         input.get_value().shape(),
-        &{
-            #[cfg(feature = "f64")]
-            {
-                output.into_iter().map(TensorFloat::from)
-            }
-            #[cfg(not(feature = "f64"))]
-            {
-                output.into_iter()
-            }
-        }
-        .collect::<Vec<TensorFloat>>(),
+        &{ output.into_iter() }.collect::<Vec<TensorFloat>>(),
     );
     let back = move |grad: Tensor<TensorFloat>| {
         let grad_data = grad
@@ -100,29 +92,16 @@ pub fn wgpu_relu<const N: usize, const D: usize>(
         return None;
     }
 
-    let data: Vec<f32> = input.get_value().data().iter().map(|&x| x as f32).collect();
-    let mut output = vec![0.0f32; data.len()];
+    let mut output = vec![0.0f32; input.get_value().data().len()];
 
-    let result = super::block_on_gpu(run_relu_shader(&data, &mut output));
+    let result = super::block_on_gpu(run_relu_shader(input.get_value().data(), &mut output));
     if result.is_err() {
         return None;
     }
 
     let output_tensor = Tensor::new(
         input.get_value().shape_array(),
-        &array_from_slice(
-            &{
-                #[cfg(feature = "f64")]
-                {
-                    output.into_iter().map(TensorFloat::from)
-                }
-                #[cfg(not(feature = "f64"))]
-                {
-                    output.into_iter()
-                }
-            }
-            .collect::<Vec<TensorFloat>>(),
-        ),
+        &array_from_slice(&{ output.into_iter() }.collect::<Vec<TensorFloat>>()),
     );
 
     let in_val = input.get_value().clone();
@@ -140,6 +119,7 @@ pub fn wgpu_relu<const N: usize, const D: usize>(
     Some((output_tensor, Box::new(back)))
 }
 
+#[allow(clippy::unused_async)]
 async fn run_relu_shader(input: &[f32], output: &mut [f32]) -> Result<(), GpuFailure> {
     assert_eq!(output.len() % 4, 0);
 

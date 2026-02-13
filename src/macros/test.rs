@@ -1,5 +1,7 @@
 //! Utilities to approximate the accuracy of an inference via tests.
 
+#![allow(clippy::cast_precision_loss)]
+
 use super::Tensor;
 use crate::{
     approx::{approx_eq, ApproxEquality, RelativeEq},

@@ -1,3 +1,11 @@
+#![allow(
+    clippy::many_single_char_names,
+    clippy::similar_names,
+    clippy::cast_possible_truncation,
+    clippy::too_many_lines,
+    clippy::type_complexity
+)]
+
 use super::{
     GpuFailure, GPU_CONTEXT, MATMUL_2D_BIND_GROUP_LAYOUT, MATMUL_2D_PIPELINE,
     MATMUL_BIND_GROUP_LAYOUT, MATMUL_PIPELINE,
@@ -11,15 +19,11 @@ use briny::raw::{slice_from_bytes, slice_to_bytes, to_bytes};
 use tensor_optim::TensorOps;
 use wgpu::util::DeviceExt;
 
+const MAX_MATMUL_GPU_RANK: usize = 8;
+
 fn make_tensor_info_buffer(device: &wgpu::Device, shape: &[u32], strides: &[u32]) -> wgpu::Buffer {
-    // WGSL std140 rules: each vec4<u32> is 16 bytes
-    // We pack shape[i], stride[i], and pad to 16 bytes per 4 elements.
-
-    // We'll allocate 8 vec4 slots (8 * 16 bytes = 128 bytes) for uniform alignment.
-    // Unused entries are zeroed.
-
     let mut data = [0; 128];
-    for i in 0..shape.len().min(8) {
+    for i in 0..shape.len().min(MAX_MATMUL_GPU_RANK) {
         let offset = i * 16;
         let s_bytes = shape[i].to_le_bytes();
         let st_bytes = strides[i].to_le_bytes();
@@ -36,7 +40,6 @@ fn make_tensor_info_buffer(device: &wgpu::Device, shape: &[u32], strides: &[u32]
 }
 
 fn make_contraction_info_buffer(device: &wgpu::Device, contract_axes: &[u32]) -> wgpu::Buffer {
-    // Still padded to multiple of 16 bytes
     let mut data = [0; 16];
     data[..4].copy_from_slice(&(contract_axes.len() as u32).to_le_bytes());
     for (i, &ax) in contract_axes.iter().enumerate().take(3) {
@@ -58,43 +61,6 @@ fn compute_strides(shape: &[usize]) -> Vec<u32> {
         stride *= shape[i] as u32;
     }
     strides
-}
-
-fn transpose_last_two_axes(data: &[f32], shape: &[u32]) -> Vec<f32> {
-    let rank = shape.len();
-    assert!(
-        rank >= 2,
-        "Tensor must have at least 2 axes to transpose last two"
-    );
-
-    let last = shape[rank - 1] as usize;
-    let second_last = shape[rank - 2] as usize;
-
-    // compute total number of elements
-    let total = data.len();
-    assert_eq!(total, shape.iter().map(|&x| x as usize).product::<usize>());
-
-    // strides for original tensor
-    let mut strides = vec![1; rank];
-    for i in (0..rank - 1).rev() {
-        strides[i] = strides[i + 1] * shape[i + 1] as usize;
-    }
-
-    // output array
-    let mut out = vec![0.0f32; total];
-
-    // iterate over all indices except last two dims
-    let outer_count = total / (second_last * last);
-    for outer in 0..outer_count {
-        for i in 0..second_last {
-            for j in 0..last {
-                let in_idx = outer * second_last * last + i * last + j;
-                let out_idx = outer * second_last * last + j * second_last + i;
-                out[out_idx] = data[in_idx];
-            }
-        }
-    }
-    out
 }
 
 /// Performs matrix multiplication on the GPU using a precompiled WGSL shader.
@@ -120,46 +86,44 @@ fn transpose_last_two_axes(data: &[f32], shape: &[u32]) -> Vec<f32> {
 /// rank with at least two dimensions and no more than 8.
 #[must_use]
 #[cfg(feature = "dyntensor")]
-pub fn wgpu_matmul(
-    a: &WithGrad<Tensor<TensorFloat>>,
-    b: &WithGrad<Tensor<TensorFloat>>,
+pub fn wgpu_matmul<'a>(
+    a: &'a WithGrad<Tensor<TensorFloat>>,
+    b: &'a WithGrad<Tensor<TensorFloat>>,
 ) -> Option<(
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> (Tensor<TensorFloat>, Tensor<TensorFloat>)>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> (Tensor<TensorFloat>, Tensor<TensorFloat>) + 'a>,
 )> {
-    assert!(2 <= a.get_value().shape().len() && a.get_value().shape().len() <= 8);
-    assert_eq!(a.get_value().shape().len(), b.get_value().shape().len());
+    let a_shape = a.get_value().shape();
+    let b_shape = b.get_value().shape();
 
-    let (m, k) = (a.get_value().shape()[0], a.get_value().shape()[1]);
-    let (k2, n) = (b.get_value().shape()[0], b.get_value().shape()[1]);
+    let rank = a_shape.len();
+
+    assert!((2..=8).contains(&rank));
+
+    let (m, k) = (a_shape[0], a_shape[1]);
+    let (k2, n) = (b_shape[0], b_shape[1]);
     if k != k2 {
         return None;
     }
 
-    let a_data: Vec<f32> = a.get_value().data().iter().map(|&v| v as f32).collect();
-    let b_data: Vec<f32> = b.get_value().data().iter().map(|&v| v as f32).collect();
-
-    let a_shape = a.get_value().shape(); // e.g., [2, 3]
-    let b_shape = b.get_value().shape(); // e.g., [3, 4]
-
-    assert_eq!(a_shape[a_shape.len() - 1], b_shape[b_shape.len() - 2]); // contraction axis k
+    assert_eq!(a_shape[rank - 1], b_shape[rank - 2]); // contraction axis k
 
     // output shape is all of A’s axes except the last, plus B’s last axis
-    let mut out_shape = a_shape[..a_shape.len() - 1].to_vec(); // [..., m]
+    let mut out_shape = a_shape[..rank - 1].to_vec(); // [..., m]
     out_shape.push(*b_shape.last().unwrap()); // [..., m, n]
 
     let output_size = m * n;
     let mut output_data = vec![0.0; output_size];
 
     // compute strides for all tensors
-    let a_strides = compute_strides(a.get_value().shape());
-    let b_strides = compute_strides(b.get_value().shape());
+    let a_strides = compute_strides(a_shape);
+    let b_strides = compute_strides(b_shape);
     let c_strides = compute_strides(&out_shape);
 
     // forward pass
     dispatch_matmul(
-        &a_data,
-        &b_data,
+        a.get_value().data(),
+        b.get_value().data(),
         &mut output_data,
         &a.get_value()
             .shape()
@@ -175,31 +139,17 @@ pub fn wgpu_matmul(
         &b_strides,
         &out_shape.iter().map(|&val| val as u32).collect::<Vec<_>>(),
         &c_strides,
-        &[(a.get_value().shape().len() - 1) as u32], // contract last axis
+        &[(rank - 1) as u32], // contract last axis
     )
     .ok()?;
 
-    let output_data_float: Vec<TensorFloat> = {
-        #[cfg(feature = "f64")]
-        {
-            output_data.into_iter().map(TensorFloat::from)
-        }
-        #[cfg(not(feature = "f64"))]
-        {
-            output_data.into_iter()
-        }
-    }
-    .collect();
+    let output_data_float: Vec<TensorFloat> = { output_data.into_iter() }.collect();
     let out_tensor = Tensor::new(&out_shape, &output_data_float);
 
     let a_val = a.get_value().clone();
     let b_val = b.get_value().clone();
 
     let back = move |grad: Tensor<TensorFloat>| {
-        let grad_data: Vec<f32> = grad.data().iter().map(|&v| v as f32).collect();
-        let a_data: Vec<f32> = a_val.data().iter().map(|&v| v as f32).collect();
-        let b_data: Vec<f32> = b_val.data().iter().map(|&v| v as f32).collect();
-
         let mut da_f32 = vec![0.0f32; m * k];
         let mut db_f32 = vec![0.0f32; k * n];
 
@@ -207,88 +157,52 @@ pub fn wgpu_matmul(
         let b_strides = compute_strides(b_val.shape());
         let grad_strides = compute_strides(grad.shape());
 
-        // ∂L/∂A = grad @ Bᵀ
-        let b_t_data = transpose_last_two_axes(
-            &b_data,
-            &b_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
-        );
+        let grad_shape = grad
+            .shape()
+            .iter()
+            .map(|&val| val as u32)
+            .collect::<Vec<_>>();
+
+        let a_shape = a_val
+            .shape()
+            .iter()
+            .map(|&val| val as u32)
+            .collect::<Vec<_>>();
+
+        let b_shape = b_val
+            .shape()
+            .iter()
+            .map(|&val| val as u32)
+            .collect::<Vec<_>>();
+
         let _ = dispatch_matmul(
-            &grad_data,
-            &b_t_data,
+            grad.data(),
+            b_val.data(),
             &mut da_f32,
-            &grad
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &grad_shape,
             &grad_strides,
-            &b_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &b_shape,
             &b_strides,
-            &a_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &a_shape,
             &a_strides,
             &[(b_val.shape().len() - 1) as u32],
         );
 
-        // ∂L/∂B = Aᵀ @ grad
-        let a_t_data = transpose_last_two_axes(
-            &a_data,
-            &a_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
-        );
         let _ = dispatch_matmul(
-            &a_t_data,
-            &grad_data,
+            a_val.data(),
+            grad.data(),
             &mut db_f32,
-            &a_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &a_shape,
             &a_strides,
-            &grad
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &grad_shape,
             &grad_strides,
-            &b_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &b_shape,
             &b_strides,
             &[(a_val.shape().len() - 1) as u32],
         );
 
-        let da = Tensor::new(
-            a_val.shape(),
-            &da_f32
-                .iter()
-                .map(|&x| TensorFloat::from(x))
-                .collect::<Vec<_>>(),
-        );
-        let db = Tensor::new(
-            b_val.shape(),
-            &db_f32
-                .iter()
-                .map(|&x| TensorFloat::from(x))
-                .collect::<Vec<_>>(),
-        );
+        let da = Tensor::new(a_val.shape(), &da_f32);
+        let db = Tensor::new(b_val.shape(), &db_f32);
 
         (da, db)
     };
@@ -324,47 +238,46 @@ pub fn wgpu_matmul<'a, const A: usize, const B: usize, const OUT: usize, const D
 ) -> Option<(
     Tensor<TensorFloat, OUT, D>,
     Box<
-        dyn Fn(
-            Tensor<TensorFloat, OUT, D>,
-        ) -> (Tensor<TensorFloat, A, D>, Tensor<TensorFloat, B, D>),
+        dyn FnOnce(
+                Tensor<TensorFloat, OUT, D>,
+            ) -> (Tensor<TensorFloat, A, D>, Tensor<TensorFloat, B, D>)
+            + 'a,
     >,
 )> {
     use super::array_from_slice;
 
     const {
-        assert!(2 <= D && D <= 8);
+        assert!(2 <= D && D <= MAX_MATMUL_GPU_RANK);
     }
 
-    let (m, k) = (a.get_value().shape()[0], a.get_value().shape()[1]);
-    let (k2, n) = (b.get_value().shape()[0], b.get_value().shape()[1]);
+    let a_shape = a.get_value().shape();
+    let b_shape = b.get_value().shape();
+
+    let rank = D;
+
+    let (m, k) = (a_shape[0], a_shape[1]);
+    let (k2, n) = (b_shape[0], b_shape[1]);
     if k != k2 {
         return None;
     }
 
-    let a_data: Vec<f32> = a.get_value().data().iter().map(|&v| v as f32).collect();
-    let b_data: Vec<f32> = b.get_value().data().iter().map(|&v| v as f32).collect();
+    assert_eq!(a_shape[D - 1], b_shape[rank - 2]); // contraction axis k
 
-    let a_shape = a.get_value().shape(); // e.g., [2, 3]
-    let b_shape = b.get_value().shape(); // e.g., [3, 4]
-
-    assert_eq!(a_shape[a_shape.len() - 1], b_shape[b_shape.len() - 2]); // contraction axis k
-
-    // output shape is all of A’s axes except the last, plus B’s last axis
-    let mut out_shape = a_shape[..a_shape.len() - 1].to_vec(); // [..., m]
-    out_shape.push(*b_shape.last().unwrap()); // [..., m, n]
+    let mut out_shape = a_shape[..rank - 1].to_vec();
+    out_shape.push(*b_shape.last().unwrap());
 
     let output_size = m * n;
     let mut output_data = vec![0.0; output_size];
 
     // compute strides for all tensors
-    let a_strides = compute_strides(a.get_value().shape());
-    let b_strides = compute_strides(b.get_value().shape());
+    let a_strides = compute_strides(a_shape);
+    let b_strides = compute_strides(b_shape);
     let c_strides = compute_strides(&out_shape);
 
     // forward pass
     dispatch_matmul(
-        &a_data,
-        &b_data,
+        a.get_value().data(),
+        b.get_value().data(),
         &mut output_data,
         &a.get_value()
             .shape()
@@ -380,34 +293,19 @@ pub fn wgpu_matmul<'a, const A: usize, const B: usize, const OUT: usize, const D
         &b_strides,
         &out_shape.iter().map(|&val| val as u32).collect::<Vec<_>>(),
         &c_strides,
-        &[(a.get_value().shape().len() - 1) as u32], // contract last axis
+        &[(rank - 1) as u32], // contract last axis
     )
     .ok()?;
 
-    let output_data_float: Vec<TensorFloat> = {
-        #[cfg(feature = "f64")]
-        {
-            output_data.into_iter().map(TensorFloat::from)
-        }
-        #[cfg(not(feature = "f64"))]
-        {
-            output_data.into_iter()
-        }
-    }
-    .collect();
     let out_tensor = Tensor::new(
         &array_from_slice(&out_shape),
-        &array_from_slice(&output_data_float),
+        &array_from_slice(&output_data),
     );
 
-    let a_val = a.get_value().clone();
-    let b_val = b.get_value().clone();
+    let a_val = a.get_value();
+    let b_val = b.get_value();
 
     let back = move |grad: Tensor<TensorFloat, OUT, D>| {
-        let grad_data: Vec<f32> = grad.data().iter().map(|&v| v as f32).collect();
-        let a_data: Vec<f32> = a_val.data().iter().map(|&v| v as f32).collect();
-        let b_data: Vec<f32> = b_val.data().iter().map(|&v| v as f32).collect();
-
         let mut da_f32 = vec![0.0f32; m * k];
         let mut db_f32 = vec![0.0f32; k * n];
 
@@ -415,92 +313,52 @@ pub fn wgpu_matmul<'a, const A: usize, const B: usize, const OUT: usize, const D
         let b_strides = compute_strides(b_val.shape());
         let grad_strides = compute_strides(grad.shape());
 
-        // ∂L/∂A = grad @ Bᵀ
-        let b_t_data = transpose_last_two_axes(
-            &b_data,
-            &b_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
-        );
+        let grad_shape = grad
+            .shape()
+            .iter()
+            .map(|&val| val as u32)
+            .collect::<Vec<_>>();
+
+        let a_shape = a_val
+            .shape()
+            .iter()
+            .map(|&val| val as u32)
+            .collect::<Vec<_>>();
+
+        let b_shape = b_val
+            .shape()
+            .iter()
+            .map(|&val| val as u32)
+            .collect::<Vec<_>>();
+
         let _ = dispatch_matmul(
-            &grad_data,
-            &b_t_data,
+            grad.data(),
+            b.get_value().data(),
             &mut da_f32,
-            &grad
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &grad_shape,
             &grad_strides,
-            &b_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &b_shape,
             &b_strides,
-            &a_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &a_shape,
             &a_strides,
             &[(b_val.shape().len() - 1) as u32],
         );
 
-        // ∂L/∂B = Aᵀ @ grad
-        let a_t_data = transpose_last_two_axes(
-            &a_data,
-            &a_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
-        );
         let _ = dispatch_matmul(
-            &a_t_data,
-            &grad_data,
+            a.get_value().data(),
+            grad.data(),
             &mut db_f32,
-            &a_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &a_shape,
             &a_strides,
-            &grad
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &grad_shape,
             &grad_strides,
-            &b_val
-                .shape()
-                .iter()
-                .map(|&val| val as u32)
-                .collect::<Vec<_>>(),
+            &b_shape,
             &b_strides,
             &[(a_val.shape().len() - 1) as u32],
         );
 
-        let da = Tensor::new(
-            &array_from_slice(a_val.shape()),
-            &array_from_slice(
-                &da_f32
-                    .iter()
-                    .map(|&x| TensorFloat::from(x))
-                    .collect::<Vec<_>>(),
-            ),
-        );
-        let db = Tensor::new(
-            &array_from_slice(b_val.shape()),
-            &array_from_slice(
-                &db_f32
-                    .iter()
-                    .map(|&x| TensorFloat::from(x))
-                    .collect::<Vec<_>>(),
-            ),
-        );
+        let da = Tensor::new(&array_from_slice(a_val.shape()), &array_from_slice(&da_f32));
+        let db = Tensor::new(&array_from_slice(b_val.shape()), &array_from_slice(&db_f32));
 
         (da, db)
     };
@@ -521,7 +379,9 @@ fn dispatch_matmul(
     c_strides: &[u32],
     contract_axes: &[u32],
 ) -> Result<(), GpuFailure> {
-    if a_shape.len() == 2 && b_shape.len() == 2 {
+    let rank = a_shape.len();
+
+    if rank == 2 {
         // 2D matmul
         super::block_on_gpu(run_matmul_shader(
             a,
@@ -548,6 +408,7 @@ fn dispatch_matmul(
     }
 }
 
+#[allow(clippy::unused_async)]
 async fn run_matmul_shader(
     a: &[f32],
     b: &[f32],
@@ -615,7 +476,7 @@ async fn run_matmul_shader(
         ],
     });
 
-    let pipeline = &*MATMUL_2D_PIPELINE;
+    let pipeline = &MATMUL_2D_PIPELINE;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("matmul2_encoder"),
@@ -663,6 +524,7 @@ async fn run_matmul_shader(
     Ok(())
 }
 
+#[allow(clippy::unused_async)]
 #[allow(clippy::too_many_arguments)]
 async fn run_matmul_shader_generic(
     a: &[f32],
@@ -853,6 +715,9 @@ mod tests {
         let a = WithGrad::new(Tensor::new(&[2, 2], &a_data));
         let b = WithGrad::new(Tensor::new(&[2, 2], &b_data));
 
+        let a_shape = a.get_value().shape();
+        let b_shape = b.get_value().shape();
+
         let result = wgpu_matmul(&a, &b).expect("matmul failed");
         let (_, back_fn) = result;
 
@@ -861,8 +726,8 @@ mod tests {
 
         let (d_a, d_b) = back_fn(grad);
 
-        assert_eq!(d_a.shape(), a.get_value().shape());
-        assert_eq!(d_b.shape(), b.get_value().shape());
+        assert_eq!(d_a.shape(), a_shape);
+        assert_eq!(d_b.shape(), b_shape);
     }
 
     #[test]

@@ -17,15 +17,106 @@
 //! - **Minimal overhead**: Function returns immediately upon match
 //! - **Fallback logic**: Safe and deterministic fallback to CPU
 
-#[cfg(not(feature = "alloc"))]
-use box_closure::{Align8, OpaqueFn};
+#![allow(clippy::type_complexity)]
 
-#[cfg(feature = "alloc")]
+#[cfg(not(feature = "alloc"))]
+use box_closure::{Align8, OpaqueFn, OpaqueFnOnce};
+
+#[cfg(all(feature = "alloc", any(feature = "wgpu", feature = "cuda")))]
 use crate::backend::{get_backend, Backend};
 use crate::nn::tensors::{Tensor, WithGrad};
 use crate::nn::TensorFloat;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
+
+/// Performs one step of Adam optimization on the given parameter tensor.
+///
+/// # Arguments
+///
+/// - `w`: Tensor with gradient to be updated
+/// - `m`: First moment estimate (same shape as `w`)
+/// - `v`: Second moment estimate (same shape as `w`)
+/// - `t`: Current timestep (1-based)
+/// - `lr`: Learning rate
+///
+/// # Hyperparameters (hardcoded)
+///
+/// - beta1 = 0.9
+/// - beta2 = 0.999
+/// - eps = 1e-8
+#[cfg(feature = "dyntensor")]
+pub fn adam(
+    w: &mut WithGrad<Tensor<TensorFloat>>,
+    m: &mut Tensor<TensorFloat>,
+    v: &mut Tensor<TensorFloat>,
+    t: TensorFloat,
+    lr: TensorFloat,
+) {
+    super::cpu::adam(w, m, v, t, lr);
+}
+
+/// Performs one step of Adam optimization on the given parameter tensor.
+///
+/// # Arguments
+///
+/// - `w`: Tensor with gradient to be updated
+/// - `m`: First moment estimate (same shape as `w`)
+/// - `v`: Second moment estimate (same shape as `w`)
+/// - `t`: Current timestep (1-based)
+/// - `lr`: Learning rate
+///
+/// # Hyperparameters (hardcoded)
+///
+/// - beta1 = 0.9
+/// - beta2 = 0.999
+/// - eps = 1e-8
+#[cfg(not(feature = "dyntensor"))]
+pub fn adam<const N: usize, const D: usize>(
+    w: &mut WithGrad<Tensor<TensorFloat, N, D>>,
+    m: &mut Tensor<TensorFloat, N, D>,
+    v: &mut Tensor<TensorFloat, N, D>,
+    t: TensorFloat,
+    lr: TensorFloat,
+) {
+    super::cpu::adam(w, m, v, t, lr);
+}
+
+/// BCE loss for identifying one of two classes.
+#[must_use]
+#[cfg(all(feature = "alloc", feature = "dyntensor"))]
+pub fn binary_cross_entropy_loss<'a>(
+    prediction: &'a WithGrad<Tensor<TensorFloat>>,
+    target: &'a Tensor<TensorFloat>,
+) -> (
+    TensorFloat,
+    Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat> + 'a>,
+) {
+    super::cpu::binary_cross_entropy_loss(prediction, target)
+}
+/// BCE loss for identifying one of two classes.
+#[must_use]
+#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
+pub fn binary_cross_entropy_loss<'a, const N: usize, const D: usize>(
+    prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
+    target: &'a Tensor<TensorFloat, N, D>,
+) -> (
+    TensorFloat,
+    Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat, N, D> + 'a>,
+) {
+    super::cpu::binary_cross_entropy_loss(prediction, target)
+}
+/// BCE loss for identifying one of two classes.
+#[must_use]
+#[cfg(not(feature = "alloc"))]
+pub fn binary_cross_entropy_loss<'a, const N: usize, const D: usize>(
+    prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
+    target: &'a Tensor<TensorFloat, N, D>,
+) -> (
+    TensorFloat,
+    OpaqueFn<'a, TensorFloat, Tensor<TensorFloat, N, D>, Align8<128>>,
+) {
+    super::cpu::binary_cross_entropy_loss(prediction, target)
+}
 
 /// Performs the cross entropy loss function, dispatching it among different backends.
 #[must_use]
@@ -35,7 +126,7 @@ pub fn cross_entropy_loss<'a>(
     target: &'a Tensor<TensorFloat>,
 ) -> (
     TensorFloat,
-    Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat> + 'a>,
+    Box<dyn FnOnce(TensorFloat) -> Tensor<TensorFloat> + 'a>,
 ) {
     super::cpu::cross_entropy_loss(prediction, target)
 }
@@ -47,7 +138,7 @@ pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
     target: &'a Tensor<TensorFloat, N, D>,
 ) -> (
     TensorFloat,
-    Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat, N, D> + 'a>,
+    Box<dyn FnOnce(TensorFloat) -> Tensor<TensorFloat, N, D> + 'a>,
 ) {
     super::cpu::cross_entropy_loss(prediction, target)
 }
@@ -59,46 +150,9 @@ pub fn cross_entropy_loss<'a, const N: usize, const D: usize>(
     target: &'a Tensor<TensorFloat, N, D>,
 ) -> (
     TensorFloat,
-    OpaqueFn<'a, TensorFloat, Tensor<TensorFloat, N, D>, Align8<128>>,
+    OpaqueFnOnce<'a, TensorFloat, Tensor<TensorFloat, N, D>, Align8<128>>,
 ) {
     super::cpu::cross_entropy_loss(prediction, target)
-}
-
-/// Performs the cross entropy loss function, ignoring zeroed timesteps and dispatching it among different backends.
-#[must_use]
-#[cfg(all(feature = "alloc", feature = "dyntensor"))]
-pub fn cross_entropy_nonzero_loss<'a>(
-    prediction: &'a WithGrad<Tensor<TensorFloat>>,
-    target: &'a Tensor<TensorFloat>,
-) -> (
-    TensorFloat,
-    Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat> + 'a>,
-) {
-    super::cpu::cross_entropy_nonzero_loss(prediction, target)
-}
-/// Performs the cross entropy loss function, ignoring zeroed timesteps and dispatching it among different backends.
-#[must_use]
-#[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
-pub fn cross_entropy_nonzero_loss<'a, const N: usize, const D: usize>(
-    prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
-    target: &'a Tensor<TensorFloat, N, D>,
-) -> (
-    TensorFloat,
-    Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat, N, D> + 'a>,
-) {
-    super::cpu::cross_entropy_nonzero_loss(prediction, target)
-}
-/// Performs the cross entropy loss function, ignoring zeroed timesteps and dispatching it among different backends.
-#[must_use]
-#[cfg(not(feature = "alloc"))]
-pub fn cross_entropy_nonzero_loss<'a, const N: usize, const D: usize>(
-    prediction: &'a WithGrad<Tensor<TensorFloat, N, D>>,
-    target: &'a Tensor<TensorFloat, N, D>,
-) -> (
-    TensorFloat,
-    OpaqueFn<'a, TensorFloat, Tensor<TensorFloat, N, D>, Align8<128>>,
-) {
-    super::cpu::cross_entropy_nonzero_loss(prediction, target)
 }
 
 /// Performs matrix multiplication, dispatching it among different backends.
@@ -109,8 +163,9 @@ pub fn matmul<'a>(
     b: &'a WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> (Tensor<TensorFloat>, Tensor<TensorFloat>) + 'a>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> (Tensor<TensorFloat>, Tensor<TensorFloat>) + 'a>,
 ) {
+    #[cfg(any(feature = "wgpu", feature = "cuda"))]
     match get_backend() {
         Backend::Cuda => {
             #[cfg(feature = "cuda")]
@@ -142,7 +197,7 @@ pub fn matmul<'a, const A: usize, const B: usize, const OUT: usize, const D: usi
 ) -> (
     Tensor<TensorFloat, OUT, D>,
     Box<
-        dyn Fn(
+        dyn FnOnce(
                 Tensor<TensorFloat, OUT, D>,
             ) -> (Tensor<TensorFloat, A, D>, Tensor<TensorFloat, B, D>)
             + 'a,
@@ -179,7 +234,7 @@ pub fn matmul<'a, const A: usize, const B: usize, const OUT: usize, const D: usi
     b: &'a WithGrad<Tensor<TensorFloat, B, D>>,
 ) -> (
     Tensor<TensorFloat, OUT, D>,
-    OpaqueFn<
+    OpaqueFnOnce<
         'a,
         Tensor<TensorFloat, OUT, D>,
         (Tensor<TensorFloat, A, D>, Tensor<TensorFloat, B, D>),
@@ -199,26 +254,6 @@ pub fn mse_loss<'a>(
     TensorFloat,
     Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat> + 'a>,
 ) {
-    match get_backend() {
-        Backend::Cuda => {
-            #[cfg(feature = "cuda")]
-            {
-                if let Some(result) = super::cuda::cuda_mse_loss(prediction, target) {
-                    return result;
-                }
-            }
-        }
-        Backend::Wgpu => {
-            #[cfg(feature = "wgpu")]
-            {
-                if let Some(result) = super::wgpu::wgpu_mse_loss(prediction, target) {
-                    return result;
-                }
-            }
-        }
-        Backend::Cpu => {}
-    }
-
     super::cpu::mse_loss(prediction, target)
 }
 /// Performs the MSE loss function, dispatching it among different backends.
@@ -231,26 +266,6 @@ pub fn mse_loss<'a, const N: usize, const D: usize>(
     TensorFloat,
     Box<dyn Fn(TensorFloat) -> Tensor<TensorFloat, N, D> + 'a>,
 ) {
-    match get_backend() {
-        Backend::Cuda => {
-            #[cfg(feature = "cuda")]
-            {
-                if let Some(result) = super::cuda::cuda_mse_loss(prediction, target) {
-                    return result;
-                }
-            }
-        }
-        Backend::Wgpu => {
-            #[cfg(feature = "wgpu")]
-            {
-                if let Some(result) = super::wgpu::wgpu_mse_loss(prediction, target) {
-                    return result;
-                }
-            }
-        }
-        Backend::Cpu => {}
-    }
-
     super::cpu::mse_loss(prediction, target)
 }
 /// Performs the MSE loss function, dispatching it among different backends.
@@ -269,26 +284,6 @@ pub fn mse_loss<'a, const N: usize, const D: usize>(
 /// Performs the SGD function, dispatching it among different backends.
 #[cfg(all(feature = "alloc", feature = "dyntensor"))]
 pub fn sgd(w: &mut WithGrad<Tensor<TensorFloat>>, lr: TensorFloat) {
-    match get_backend() {
-        Backend::Cuda => {
-            #[cfg(feature = "cuda")]
-            {
-                if super::cuda::cuda_sgd(w, lr) {
-                    return;
-                }
-            }
-        }
-        Backend::Wgpu => {
-            #[cfg(feature = "wgpu")]
-            {
-                if super::wgpu::wgpu_sgd(w, lr) {
-                    return;
-                }
-            }
-        }
-        Backend::Cpu => {}
-    }
-
     super::cpu::sgd(w, lr);
 }
 /// Performs the SGD function, dispatching it among different backends.
@@ -297,26 +292,6 @@ pub fn sgd<const N: usize, const D: usize>(
     w: &mut WithGrad<Tensor<TensorFloat, N, D>>,
     lr: TensorFloat,
 ) {
-    match get_backend() {
-        Backend::Cuda => {
-            #[cfg(feature = "cuda")]
-            {
-                if super::cuda::cuda_sgd(w, lr) {
-                    return;
-                }
-            }
-        }
-        Backend::Wgpu => {
-            #[cfg(feature = "wgpu")]
-            {
-                if super::wgpu::wgpu_sgd(w, lr) {
-                    return;
-                }
-            }
-        }
-        Backend::Cpu => {}
-    }
-
     super::cpu::sgd(w, lr);
 }
 /// Performs the SGD function, dispatching it among different backends.
@@ -335,28 +310,8 @@ pub fn relu(
     input: &WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
 ) {
-    match get_backend() {
-        Backend::Cuda => {
-            #[cfg(feature = "cuda")]
-            {
-                if let Some(result) = super::cuda::cuda_relu(input) {
-                    return result;
-                }
-            }
-        }
-        Backend::Wgpu => {
-            #[cfg(feature = "wgpu")]
-            {
-                if let Some(result) = super::wgpu::wgpu_relu(input) {
-                    return result;
-                }
-            }
-        }
-        Backend::Cpu => {}
-    }
-
     super::cpu::relu(input)
 }
 /// Performs the `ReLU` activation function, dispatching it among different backends.
@@ -366,28 +321,8 @@ pub fn relu<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
 ) {
-    match get_backend() {
-        Backend::Cuda => {
-            #[cfg(feature = "cuda")]
-            {
-                if let Some(result) = super::cuda::cuda_relu(input) {
-                    return result;
-                }
-            }
-        }
-        Backend::Wgpu => {
-            #[cfg(feature = "wgpu")]
-            {
-                if let Some(result) = super::wgpu::wgpu_relu(input) {
-                    return result;
-                }
-            }
-        }
-        Backend::Cpu => {}
-    }
-
     super::cpu::relu(input)
 }
 /// Performs the `ReLU` activation function, dispatching it among different backends.
@@ -397,7 +332,7 @@ pub fn relu<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+    OpaqueFnOnce<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
 ) {
     super::cpu::relu(input)
 }
@@ -409,7 +344,7 @@ pub fn softmax(
     input: &WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
 ) {
     super::cpu::softmax(input)
 }
@@ -420,7 +355,7 @@ pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N1, D>>,
 ) -> (
     Tensor<TensorFloat, N2, D>,
-    Box<dyn Fn(Tensor<TensorFloat, N2, D>) -> Tensor<TensorFloat, N1, D> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat, N2, D>) -> Tensor<TensorFloat, N1, D> + '_>,
 ) {
     super::cpu::softmax(input)
 }
@@ -431,7 +366,7 @@ pub fn softmax<const N1: usize, const N2: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N1, D>>,
 ) -> (
     Tensor<TensorFloat, N2, D>,
-    OpaqueFn<'_, Tensor<TensorFloat, N2, D>, Tensor<TensorFloat, N1, D>, Align8<128>>,
+    OpaqueFnOnce<'_, Tensor<TensorFloat, N2, D>, Tensor<TensorFloat, N1, D>, Align8<128>>,
 ) {
     super::cpu::softmax(input)
 }
@@ -443,29 +378,29 @@ pub fn sigmoid(
     input: &WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
 ) {
     super::cpu::sigmoid(input)
 }
 /// Performs the sigmoid activation function, dispatching it among different backends.
 #[must_use]
 #[cfg(all(feature = "alloc", not(feature = "dyntensor")))]
-pub fn sigmoid<const N: usize, const D: usize>(
-    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+pub fn sigmoid<const N1: usize, const N2: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N1, D>>,
 ) -> (
-    Tensor<TensorFloat, N, D>,
-    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+    Tensor<TensorFloat, N2, D>,
+    Box<dyn FnOnce(Tensor<TensorFloat, N2, D>) -> Tensor<TensorFloat, N1, D> + '_>,
 ) {
     super::cpu::sigmoid(input)
 }
 /// Performs the sigmoid activation function, dispatching it among different backends.
 #[must_use]
 #[cfg(not(feature = "alloc"))]
-pub fn sigmoid<const N: usize, const D: usize>(
-    input: &WithGrad<Tensor<TensorFloat, N, D>>,
+pub fn sigmoid<const N1: usize, const N2: usize, const D: usize>(
+    input: &WithGrad<Tensor<TensorFloat, N1, D>>,
 ) -> (
-    Tensor<TensorFloat, N, D>,
-    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+    Tensor<TensorFloat, N2, D>,
+    OpaqueFnOnce<'_, Tensor<TensorFloat, N2, D>, Tensor<TensorFloat, N1, D>, Align8<128>>,
 ) {
     super::cpu::sigmoid(input)
 }
@@ -477,7 +412,8 @@ pub fn gelu(
     input: &WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+    Box<[TensorFloat]>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
 ) {
     super::cpu::gelu(input)
 }
@@ -488,7 +424,8 @@ pub fn gelu<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+    Box<[TensorFloat; N]>,
+    Box<dyn FnOnce(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
 ) {
     super::cpu::gelu(input)
 }
@@ -499,7 +436,8 @@ pub fn gelu<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+    [TensorFloat; N],
+    OpaqueFnOnce<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
 ) {
     super::cpu::gelu(input)
 }
@@ -511,7 +449,8 @@ pub fn swish(
     input: &WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+    Box<[TensorFloat]>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
 ) {
     super::cpu::swish(input)
 }
@@ -522,7 +461,8 @@ pub fn swish<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+    Box<[TensorFloat; N]>,
+    Box<dyn FnOnce(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
 ) {
     super::cpu::swish(input)
 }
@@ -533,7 +473,8 @@ pub fn swish<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+    [TensorFloat; N],
+    OpaqueFnOnce<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
 ) {
     super::cpu::swish(input)
 }
@@ -545,7 +486,7 @@ pub fn tanh(
     input: &WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> Tensor<TensorFloat> + '_>,
 ) {
     super::cpu::tanh(input)
 }
@@ -556,7 +497,7 @@ pub fn tanh<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    Box<dyn Fn(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
+    Box<dyn FnOnce(Tensor<TensorFloat, N, D>) -> Tensor<TensorFloat, N, D> + '_>,
 ) {
     super::cpu::tanh(input)
 }
@@ -567,7 +508,7 @@ pub fn tanh<const N: usize, const D: usize>(
     input: &WithGrad<Tensor<TensorFloat, N, D>>,
 ) -> (
     Tensor<TensorFloat, N, D>,
-    OpaqueFn<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
+    OpaqueFnOnce<'_, Tensor<TensorFloat, N, D>, Tensor<TensorFloat, N, D>, Align8<128>>,
 ) {
     super::cpu::tanh(input)
 }

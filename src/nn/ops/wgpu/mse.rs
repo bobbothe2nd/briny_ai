@@ -1,3 +1,5 @@
+#![allow(clippy::cast_precision_loss, clippy::type_complexity)]
+
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use super::{Box, GpuFailure, GPU_CONTEXT, MSE_LOSS_BIND_GROUP_LAYOUT, MSE_LOSS_PIPELINE};
@@ -47,17 +49,19 @@ pub fn wgpu_mse_loss<'a>(
         return None;
     }
 
-    let p: Vec<f32> = pred.get_value().data().iter().map(|&x| x as f32).collect();
-    let t: Vec<f32> = target.data().iter().map(|&x| x as f32).collect();
-
-    let result = super::block_on_gpu(run_mse_loss_shader(&p, &t)).ok()?;
+    let result =
+        super::block_on_gpu(run_mse_loss_shader(pred.get_value().data(), target.data())).ok()?;
 
     let back = Box::new(move |grad: TensorFloat| {
         #[allow(clippy::cast_precision_loss)]
-        let grad_data: Vec<TensorFloat> = p
+        let grad_data: Vec<TensorFloat> = pred
+            .get_value()
+            .data()
             .iter()
-            .zip(t.iter())
-            .map(|(&x, &y)| 2.0 * grad * TensorFloat::from(x - y) / p.len() as TensorFloat)
+            .zip(target.data().iter())
+            .map(|(&x, &y)| {
+                2.0 * grad * TensorFloat::from(x - y) / pred.get_value().data().len() as TensorFloat
+            })
             .collect();
         Tensor::new(pred.get_value().shape(), &grad_data)
     });
@@ -100,19 +104,21 @@ pub fn wgpu_mse_loss<'a, const N: usize, const D: usize>(
         return None;
     }
 
-    let p: Vec<f32> = pred.get_value().data().iter().map(|&x| x as f32).collect();
-    let t: Vec<f32> = target.data().iter().map(|&x| x as f32).collect();
-
-    let result = super::block_on_gpu(run_mse_loss_shader(&p, &t)).ok()?;
+    let result =
+        super::block_on_gpu(run_mse_loss_shader(pred.get_value().data(), target.data())).ok()?;
 
     let back = move |grad: TensorFloat| {
         use tensor_optim::ConstTensorOps;
 
         #[allow(clippy::cast_precision_loss)]
-        let grad_data: Vec<TensorFloat> = p
+        let grad_data: Vec<TensorFloat> = pred
+            .get_value()
+            .data()
             .iter()
-            .zip(t.iter())
-            .map(|(&x, &y)| 2.0 * grad * TensorFloat::from(x - y) / p.len() as TensorFloat)
+            .zip(target.data().iter())
+            .map(|(&x, &y)| {
+                2.0 * grad * TensorFloat::from(x - y) / pred.get_value().data().len() as TensorFloat
+            })
             .collect();
         Tensor::new(
             pred.get_value().shape_array(),
@@ -123,6 +129,7 @@ pub fn wgpu_mse_loss<'a, const N: usize, const D: usize>(
     Some((TensorFloat::from(result), Box::new(back)))
 }
 
+#[allow(clippy::unused_async)]
 async fn run_mse_loss_shader(prediction: &[f32], target: &[f32]) -> Result<f32, GpuFailure> {
     let device = &GPU_CONTEXT.device;
     let queue = &GPU_CONTEXT.queue;

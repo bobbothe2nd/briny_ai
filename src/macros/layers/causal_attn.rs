@@ -7,25 +7,41 @@ use alloc::boxed::Box;
 use core::marker::PhantomData;
 use tensor_optim::TensorOps;
 
-/// Self attention layer builder.
-pub struct SelfAttention<const RANK: usize, const SIZE: usize, O> {
+fn apply_causal_mask<const RANK: usize, const SIZE: usize>(scores: &mut Tensor<RANK, SIZE>) {
+    let seq_len = scores.shape()[RANK - 1];
+    for outer in 0..scores.shape()[..(RANK - 2)].iter().product() {
+        let offset = outer * seq_len * seq_len;
+        for i in 0..seq_len {
+            for j in (i + 1)..seq_len {
+                scores.data_mut()[offset + (i * seq_len) + j] = f32::NEG_INFINITY;
+            }
+        }
+    }
+}
+
+/// Causal self attention layer builder.
+pub struct CausalSelfAttention<const RANK: usize, const SIZE: usize, O> {
     /// Shape of weights.
     pub shape: [usize; RANK],
-    /// Initial contents of weights.
+
+    /// Initial content of weights.
     pub data: Box<[TensorFloat; SIZE]>,
+
     /// Optimizer of weights.
     pub _optim: PhantomData<O>,
 }
 
-impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttention<RANK, SIZE, O> {
-    /// Amount of weights (Q, K, V).
+impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>>
+    CausalSelfAttention<RANK, SIZE, O>
+{
+    /// Count of tensors (Q, K, V).
     pub const TENSORS: usize = 3;
 
     /// Expands the layer.
     #[must_use]
     #[allow(clippy::explicit_auto_deref)]
-    pub fn build(self) -> SelfAttentionLayer<RANK, SIZE, O> {
-        SelfAttentionLayer {
+    pub fn build(self) -> CausalSelfAttentionLayer<RANK, SIZE, O> {
+        CausalSelfAttentionLayer {
             w_q: Tensor::new(&self.shape, &*self.data).with_grad(),
             w_k: (Tensor::new(&self.shape, &*self.data) - 0.1).with_grad(),
             w_v: (Tensor::new(&self.shape, &*self.data) + 0.1).with_grad(),
@@ -35,24 +51,26 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttention<R
 }
 
 impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> BuildLayer<RANK, SIZE, 3>
-    for SelfAttention<RANK, SIZE, O>
+    for CausalSelfAttention<RANK, SIZE, O>
 {
-    type Layer = SelfAttentionLayer<RANK, SIZE, O>;
+    type Layer = CausalSelfAttentionLayer<RANK, SIZE, O>;
 
-    fn build(self) -> SelfAttentionLayer<RANK, SIZE, O> {
+    fn build(self) -> CausalSelfAttentionLayer<RANK, SIZE, O> {
         self.build()
     }
 }
 
-/// Self attention function.
-pub struct SelfAttentionLayer<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> {
+/// Causal self attention function.
+pub struct CausalSelfAttentionLayer<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> {
     w_q: WithGrad<Tensor<RANK, SIZE>>,
     w_k: WithGrad<Tensor<RANK, SIZE>>,
     w_v: WithGrad<Tensor<RANK, SIZE>>,
     optim: O,
 }
 
-impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttentionLayer<RANK, SIZE, O> {
+impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>>
+    CausalSelfAttentionLayer<RANK, SIZE, O>
+{
     #[inline]
     #[must_use]
     #[allow(clippy::useless_conversion)]
@@ -62,7 +80,6 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttentionLa
     ) -> (
         Tensor<RANK, OUT_SIZE>,
         Backward<'a, RANK, OUT_SIZE, SIZE, IN_SIZE>,
-        [(); W_SIZE],
     ) {
         let input = input.get_value();
 
@@ -77,7 +94,9 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttentionLa
 
         let kt = k.transpose();
 
-        let scores = q.matmul(&kt);
+        let mut scores = q.matmul(&kt);
+        apply_causal_mask::<RANK, W_SIZE>(&mut scores);
+
         let scores: WithGrad<Tensor<RANK, W_SIZE>> = (scores * scale).with_grad();
 
         let (attn, _): (Tensor<RANK, W_SIZE>, _) = softmax(&scores);
@@ -97,7 +116,7 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttentionLa
                     let outer_size: usize = shape[..shape.len() - 1].iter().product();
 
                     let grad_data = grad_attn.data();
-                    let mut grad = alloc::vec![0.0; W_SIZE];
+                    let mut grad = alloc::vec![0.0; grad_attn.data().len()];
 
                     for i in 0..outer_size {
                         let offset = i * last_dim;
@@ -166,7 +185,6 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttentionLa
             (
                 out,
                 Backward::Quaternary(alloc::boxed::Box::new(back)),
-                [(); W_SIZE],
             )
         }
         #[cfg(not(feature = "alloc"))]
@@ -174,21 +192,25 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttentionLa
             (
                 out,
                 Backward::Quaternary(box_closure::OpaqueFnOnce::new(back)),
-                [(); W_SIZE],
             )
         }
     }
 
-    /// Forwards the layer.
+    /// Forwards the causal attention layer.
     #[cfg(feature = "dyntensor")]
     pub fn forward<'a>(
         &'a self,
         input: &'a WithGrad<Tensor<RANK, 0>>,
     ) -> (Tensor<RANK, 0>, Backward<'a, RANK, 0, SIZE, 0>, [(); 0]) {
-        self.__forward(input)
+        let (out, back) = self.__forward::<0, 0, 0>(input);
+        (
+            out,
+            back,
+            [],
+        )
     }
 
-    /// Forwards the layer.
+    /// Forwards the causal attention layer.
     #[cfg(not(feature = "dyntensor"))]
     pub fn forward<'a, const IN_SIZE: usize, const W_SIZE: usize>(
         &'a self,
@@ -198,7 +220,12 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttentionLa
         Backward<'a, RANK, IN_SIZE, SIZE, IN_SIZE>,
         [(); W_SIZE],
     ) {
-        self.__forward(input)
+        let (out, back) = self.__forward::<IN_SIZE, IN_SIZE, W_SIZE>(input);
+        (
+            out,
+            back,
+            [(); W_SIZE],
+        )
     }
 
     #[must_use]
@@ -214,11 +241,11 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttentionLa
                 let (grad_q, grad_k, grad_v, grad_w) = f.invoke_once(grad_out);
                 (grad_w, [grad_q, grad_k, grad_v])
             }
-            _ => unreachable!("SelfAttention always has a quaternary closure"),
+            _ => unreachable!("CausalSelfAttention always has a quaternary closure"),
         }
     }
 
-    /// Differentiates the layer.
+    /// Differentiates the causal attention layer.
     pub fn backward<const IN_SIZE: usize>(
         &self,
         grad_out: Tensor<RANK, IN_SIZE>,
@@ -229,7 +256,7 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> SelfAttentionLa
 }
 
 impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> Layer<RANK, SIZE, 3>
-    for SelfAttentionLayer<RANK, SIZE, O>
+    for CausalSelfAttentionLayer<RANK, SIZE, O>
 {
     fn optim_weights(
         &mut self,
@@ -253,7 +280,7 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> Layer<RANK, SIZ
 }
 
 impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> LayerOpHeavy<RANK, SIZE, 3>
-    for SelfAttentionLayer<RANK, SIZE, O>
+    for CausalSelfAttentionLayer<RANK, SIZE, O>
 {
     #[inline]
     fn forward<'a, const IN_SIZE: usize, const W_SIZE: usize, const OUT_SIZE: usize>(
@@ -267,7 +294,7 @@ impl<const RANK: usize, const SIZE: usize, O: Optim<RANK, SIZE>> LayerOpHeavy<RA
             assert!(IN_SIZE == OUT_SIZE, "data length mismatch in forward");
         }
 
-        let (out, back, _) = self.__forward::<IN_SIZE, OUT_SIZE, W_SIZE>(input);
+        let (out, back) = self.__forward::<IN_SIZE, OUT_SIZE, W_SIZE>(input);
         (out, back)
     }
 

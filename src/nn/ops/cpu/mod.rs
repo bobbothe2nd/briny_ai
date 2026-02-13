@@ -34,11 +34,14 @@
 
 use crate::nn::TensorFloat;
 
+mod adam;
+pub use self::adam::adam;
+
+mod binary_cross_entropy_loss;
+pub use self::binary_cross_entropy_loss::binary_cross_entropy_loss;
+
 mod cross_entropy_loss;
 pub use self::cross_entropy_loss::cross_entropy_loss;
-
-mod cross_entropy_nonzero_loss;
-pub use self::cross_entropy_nonzero_loss::cross_entropy_nonzero_loss;
 
 mod matmul;
 pub use self::matmul::matmul;
@@ -69,26 +72,22 @@ pub use self::gelu::gelu;
 
 #[inline]
 fn exp(x: TensorFloat) -> TensorFloat {
-    #[cfg(feature = "f64")]
-    {
-        libm::exp(x)
-    }
-    #[cfg(not(feature = "f64"))]
-    {
-        TensorFloat::from(libm::expf(x as f32))
-    }
+    libm::expf(x)
+}
+
+#[inline]
+fn pow(x: TensorFloat, y: TensorFloat) -> TensorFloat {
+    libm::powf(x, y)
 }
 
 #[inline]
 fn ln(x: TensorFloat) -> TensorFloat {
-    #[cfg(feature = "f64")]
-    {
-        libm::log(x)
-    }
-    #[cfg(not(feature = "f64"))]
-    {
-        TensorFloat::from(libm::logf(x as f32))
-    }
+    libm::logf(x)
+}
+
+#[inline]
+fn sqrt(x: TensorFloat) -> TensorFloat {
+    libm::sqrtf(x)
 }
 
 #[cfg(test)]

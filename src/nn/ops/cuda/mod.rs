@@ -1,5 +1,7 @@
 //! Ultra fast Nvidia-only CUDA acceleration.
 
+#![allow(clippy::type_complexity)]
+
 use crate::nn::tensors::{Tensor, WithGrad};
 use crate::nn::TensorFloat;
 use alloc::boxed::Box;
@@ -8,11 +10,11 @@ use alloc::boxed::Box;
 #[must_use]
 #[cfg(feature = "dyntensor")]
 pub fn cuda_matmul<'a>(
-    a: &WithGrad<Tensor<TensorFloat>>,
-    b: &WithGrad<Tensor<TensorFloat>>,
+    a: &'a WithGrad<Tensor<TensorFloat>>,
+    b: &'a WithGrad<Tensor<TensorFloat>>,
 ) -> Option<(
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> (Tensor<TensorFloat>, Tensor<TensorFloat>) + 'a>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> (Tensor<TensorFloat>, Tensor<TensorFloat>) + 'a>,
 )> {
     // TODO: implement using `cust` crate
     super::wgpu::wgpu_matmul(a, b) // wgpu fallback
@@ -26,9 +28,10 @@ pub fn cuda_matmul<'a, const A: usize, const B: usize, const OUT: usize, const D
 ) -> Option<(
     Tensor<TensorFloat, OUT, D>,
     Box<
-        dyn Fn(
-            Tensor<TensorFloat, OUT, D>,
-        ) -> (Tensor<TensorFloat, A, D>, Tensor<TensorFloat, B, D>),
+        dyn FnOnce(
+                Tensor<TensorFloat, OUT, D>,
+            ) -> (Tensor<TensorFloat, A, D>, Tensor<TensorFloat, B, D>)
+            + 'a,
     >,
 )> {
     // TODO: implement using `cust` crate

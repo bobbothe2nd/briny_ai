@@ -1,6 +1,5 @@
-use crate::nn::tensors::{Tensor, WithGrad};
+use crate::nn::tensors::{Tensor, TensorGrad, WithGrad};
 use crate::nn::TensorFloat;
-use tensor_optim::TensorOps;
 
 /// Performs one step of stochastic gradient descent (SGD) on the given parameter tensor.
 ///
@@ -20,16 +19,8 @@ use tensor_optim::TensorOps;
 #[cfg(feature = "dyntensor")]
 pub fn sgd(w: &mut WithGrad<Tensor<TensorFloat>>, lr: TensorFloat) {
     let (params, grads) = w.split_mut();
-    let params_data = params.data_mut();
-    let grads_data = grads.data();
-
-    for (param, grad) in params_data.iter_mut().zip(grads_data.iter()) {
-        *param -= lr * *grad;
-    }
-
-    for grad in grads.data_mut() {
-        *grad = 0.0;
-    }
+    *params -= grads.clone() * lr;
+    *grads = grads.zeros_like();
 }
 
 /// Performs one step of stochastic gradient descent (SGD) on the given parameter tensor.
@@ -53,14 +44,6 @@ pub fn sgd<const N: usize, const D: usize>(
     lr: TensorFloat,
 ) {
     let (params, grads) = w.split_mut();
-    let params_data = params.data_mut();
-    let grads_data = grads.data();
-
-    for (param, grad) in params_data.iter_mut().zip(grads_data.iter()) {
-        *param -= lr * *grad;
-    }
-
-    for grad in grads.data_mut() {
-        *grad = 0.0;
-    }
+    *params -= grads.clone() * lr;
+    *grads = grads.zeros_like();
 }

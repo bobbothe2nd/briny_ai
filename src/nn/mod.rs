@@ -9,25 +9,69 @@
 //! always compile for correct uses - whether features are removed, added, etc., the
 //! abstraction is abstracted the same way every time.
 
+pub use lazy_simd::scalar::{ArrayOf, Flatten, Primitive, SubsetOf, SupersetOf};
+
+pub mod io;
 pub mod ops;
 pub mod tensors;
-// pub mod io;
 
-#[cfg(feature = "f64")]
-type TensorFloatInner = f64;
-#[cfg(not(feature = "f64"))]
+/// Conversions between primitive floats;
+pub trait IntermediateFp {
+    /// Convert to `f32`.
+    fn into_f32(self) -> f32;
+    /// Convert from `f32`.
+    fn from_f32(x: f32) -> Self;
+
+    /// Convert to `f64`.
+    fn into_f64(self) -> f64;
+    /// Convert from `f64`.
+    fn from_f64(x: f64) -> Self;
+}
+
+impl IntermediateFp for f32 {
+    fn from_f32(x: Self) -> Self {
+        x
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn from_f64(x: f64) -> Self {
+        x as Self
+    }
+
+    fn into_f32(self) -> Self {
+        self
+    }
+
+    fn into_f64(self) -> f64 {
+        f64::from(self)
+    }
+}
+
+impl IntermediateFp for f64 {
+    fn from_f32(x: f32) -> Self {
+        Self::from(x)
+    }
+
+    fn from_f64(x: Self) -> Self {
+        x
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn into_f32(self) -> f32 {
+        self as f32
+    }
+
+    fn into_f64(self) -> Self {
+        self
+    }
+}
+
 type TensorFloatInner = f32;
 
-/// The float used in tensors.
-///
-/// - `f64` on 64-bit machines
-/// - `f32` on 32-bit machines
-/// - `f32` on 16-bit machines
+/// The float used in tensors (`f32`/`fp32`).
 pub type TensorFloat = TensorFloatInner;
 
 /// The amount of [`TensorFloat`]s in a SIMD register on the target.
-pub const FLOAT_LANES: usize = if cfg!(target_pointer_width = "64") {
-    lazy_simd::MAX_SIMD_DOUBLE_PRECISION_LANES * 2 // should be 1/2, but doesn't compile if not
-} else {
-    lazy_simd::MAX_SIMD_SINGLE_PRECISION_LANES // equal to the above
-};
+///
+/// Equal to [`lazy_simd::MAX_SIMD_SINGLE_PRECISION_LANES`]
+pub const FLOAT_LANES: usize = lazy_simd::MAX_SIMD_SIZE / size_of::<TensorFloat>();

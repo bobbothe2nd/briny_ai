@@ -14,8 +14,12 @@ pub use tensor_optim::TensorOps;
 use crate::nn::TensorFloat;
 
 pub use self::optim::{Flatten, StaticShape, Tensor, TensorGrad};
+
 #[cfg(feature = "alloc")]
 pub use vec::VecTensor;
+
+#[cfg(feature = "alloc")]
+pub use self::optim::FlatBox;
 
 /// A trait mainly for converting `Tensor`s to `WithGrad`.
 pub trait IntoWithGrad<T>: TensorGrad<T> + Sized {
@@ -110,7 +114,7 @@ impl<T: TensorGrad<U>, U> WithGrad<T, U> {
     /// Maps the value of `self`.
     #[must_use]
     pub fn map_value<F>(self, f: F) -> Self
-    where 
+    where
         F: Fn(T) -> T,
     {
         Self {
@@ -123,7 +127,7 @@ impl<T: TensorGrad<U>, U> WithGrad<T, U> {
     /// Maps the gradient of `self`.
     #[must_use]
     pub fn map_grad<F>(self, f: F) -> Self
-    where 
+    where
         F: Fn(T) -> T,
     {
         Self {

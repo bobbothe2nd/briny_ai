@@ -1,38 +1,35 @@
 use briny_ai::prelude::*;
 
 static_model!(
-    @loss mse_loss
-    @optim sgd
-    @model XorModel
+    @loss binary_cross_entropy_loss
+    @optim Sgd
+    @model XorModel(model)
     {
         InputLayer([4, 2]),
         {
-            conv0: Collapse([4, 2]) => CollapseLayer,
-            act0: Activation([4, 1], ReLU) => ActivationLayer,
+            collapse0: Collapse([2, 4]) => CollapseLayer,
+            act1: Activation([4, 4], Tanh) => ActivationLayer,
+            collapse1: Collapse([4, 1]) => CollapseLayer,
+            sigmoid: Sigmoid([4, 1]) => SigmoidLayer,
         },
         OutputLayer([4, 1]),
     }
 );
 
-// const PATH_TO_MODEL: &str = "checkpoints/xor/model.bpat";
+const PATH_TO_MODEL: &str = "checkpoints/xor/model.bpat";
 
 fn main() {
-    // GPU overhead is far too much for a small network; use CPU
-    set_backend(Backend::Cpu); // default, but being explicit
-
     let base_inputs = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]];
     let base_targets = [[0.0], [1.0], [1.0], [0.0]];
 
-    let dataset = Dataset::new(&base_inputs, &base_targets);
+    let dataset = Dataset::new(base_inputs, base_targets);
 
-    let mut model = XorModel::new(1.0).with_lr(0.01);
+    let mut model = XorModel::new(0.4);
 
-    #[cfg(feature = "std")]
     println!("Loading model...");
 
-    // let _ = model.load(PATH_TO_MODEL);
+    let _ = model.load(PATH_TO_MODEL);
 
-    #[cfg(feature = "std")]
     println!("Beginning training...");
 
     let mut score = 0.0;
@@ -40,9 +37,8 @@ fn main() {
 
     while score != 100.0 {
         #[cfg_attr(not(feature = "std"), allow(unused_variables))]
-        let loss = model.fit(&dataset, 10000000, decay_lr);
+        let loss = model.fit(&dataset, 10000, adapt_lr);
 
-        #[cfg(feature = "std")]
         println!(
             "\n=== EPOCH {:?} ===\nTRAINING: loss={:?}, lr={:?}",
             i,
@@ -50,24 +46,22 @@ fn main() {
             model.get_lr()
         );
 
-        if i.is_multiple_of(10) {
+        if i.is_multiple_of(100) {
             let eval = model.infer(&dataset);
 
             score = eval.score;
 
-            #[cfg(feature = "std")]
             println!(
                 "TESTING: loss={:?}, acc={:?}%, score={:?}%",
                 eval.loss, eval.acc, score
             );
 
-            // model.save(PATH_TO_MODEL).unwrap();
+            model.save(PATH_TO_MODEL, BpatHeader::BpatV1).unwrap();
         }
 
         i += 1;
     }
 
-    #[cfg(feature = "std")]
     println!("model reached 100% acc");
-    // model.save(PATH_TO_MODEL).unwrap();
+    model.save(PATH_TO_MODEL, BpatHeader::BpatV1).unwrap();
 }

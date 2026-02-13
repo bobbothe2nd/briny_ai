@@ -3,8 +3,8 @@ fn main() {
     use std::io::Read;
 
     use briny_ai::backend::{set_backend, Backend};
+    use briny_ai::nn::io::{load_tensors, save_tensors, BpatHeader};
     use briny_ai::nn::ops::dispatch::{matmul, mse_loss, relu, sgd};
-    // use briny_ai::nn::io::{load_tensors, save_tensors, BpatHeader};
     use briny_ai::nn::tensors::{IntoWithGrad, Tensor, TensorOps};
 
     use briny_ai::nn::TensorFloat;
@@ -104,7 +104,7 @@ fn main() {
             println!("Epoch {}: Loss = {:.6}", epoch, loss);
         }
 
-        // Backprop
+        // backprop
         let dloss = back_loss(1.0);
         let (dz2_a1, dz2_w2) = back2(dloss);
         let d_relu = back_relu(dz2_a1);
@@ -113,11 +113,7 @@ fn main() {
         let grads_w1 = dz1_w1.data().to_vec();
         let grads_w2 = dz2_w2.data().to_vec();
 
-        drop(back1);
-        drop(back2);
-        drop(back_relu);
-
-        // Accumulate grads
+        // accumulate grads
         for (g, val) in w1.get_grad_mut().data_mut().iter_mut().zip(grads_w1) {
             *g += val;
         }
@@ -129,20 +125,20 @@ fn main() {
         sgd(&mut w2, 0.01);
     }
 
-    // println!("Saving tensors...");
-    // save_tensors(
-    //     "checkpoints/m-mnist/model.bpat",
-    //     &[w1.get_value().clone(), w2.get_value().clone()],
-    //     BpatHeader::BpatV1
-    // )
-    // .unwrap();
+    println!("Saving tensors...");
+    save_tensors(
+        "checkpoints/m-mnist/model.bpat",
+        &[w1.get_value().clone(), w2.get_value().clone()],
+        BpatHeader::BpatV1,
+    )
+    .unwrap();
 
-    // let restored = load_tensors::<TensorFloat>("checkpoints/m-mnist/model.bpat").unwrap();
-    // for tensor in restored {
-    //     println!(
-    //         "Shape: {:?}, First vals: {:?}",
-    //         tensor.shape(),
-    //         &tensor.data()[..5]
-    //     );
-    // }
+    let restored = load_tensors::<TensorFloat>("checkpoints/m-mnist/model.bpat").unwrap();
+    for tensor in restored {
+        println!(
+            "Shape: {:?}, First vals: {:?}",
+            tensor.shape(),
+            &tensor.data()[..5]
+        );
+    }
 }

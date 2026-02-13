@@ -22,7 +22,7 @@ use crate::nn::tensors::VecTensor;
 use core::{
     mem::{ManuallyDrop, MaybeUninit},
     num::Wrapping,
-    ops::{Add, Div, Mul, Sub},
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign},
     sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize},
 };
 
@@ -47,7 +47,14 @@ pub trait Flatten<const N: usize> {
     type Flattened;
 
     /// Flattens `self` if nested, otherwise it's already flat.
-    fn flatten(&self) -> Self::Flattened;
+    fn flatten(self) -> Self::Flattened;
+}
+
+#[cfg(feature = "alloc")]
+/// A trait to flatten nested types.
+pub trait FlatBox<const N: usize>: Flatten<N> {
+    /// Copies, flattens, and boxes `self`.
+    fn flat_box(&self) -> alloc::boxed::Box<Self::Flattened>;
 }
 
 /// A marker for types that are already flattened.
@@ -110,55 +117,144 @@ impl Unflatten for AtomicIsize {}
 impl<T: Default + Copy + Unflatten, const N: usize> Flatten<N> for [T; N] {
     type Flattened = [T; N];
 
-    fn flatten(&self) -> Self::Flattened {
-        *self
+    fn flatten(self) -> Self::Flattened {
+        self
     }
 }
 
-impl<T: Default + Copy + Unflatten, const X: usize, const Y: usize, const N: usize> Flatten<N>
+impl<T: Copy + Unflatten, const X: usize, const Y: usize, const N: usize> Flatten<N>
     for [[T; X]; Y]
 {
     type Flattened = [T; N];
 
-    fn flatten(&self) -> Self::Flattened {
+    fn flatten(self) -> Self::Flattened {
         const {
             assert!(N == X * Y, "flattenning to an invalid length");
         }
 
-        let mut arr = [T::default(); N];
-        for (i, chunk) in self.iter().enumerate() {
-            let start = i * X;
-            let end = start + X;
-            arr[start..end].copy_from_slice(chunk);
+        unsafe {
+            let out = (&raw const self).cast::<[T; N]>().read();
+            let _ = self;
+            out
         }
-        arr
     }
 }
 
-impl<
-        T: Default + Copy + Unflatten,
-        const X: usize,
-        const Y: usize,
-        const Z: usize,
-        const N: usize,
-    > Flatten<N> for [[[T; X]; Y]; Z]
+impl<T: Unflatten + Copy, const X: usize, const Y: usize, const Z: usize, const N: usize> Flatten<N>
+    for [[[T; X]; Y]; Z]
 {
     type Flattened = [T; N];
 
-    fn flatten(&self) -> Self::Flattened {
+    fn flatten(self) -> Self::Flattened {
         const {
             assert!(N == X * Y * Z, "flattenning to an invalid length");
         }
 
-        let mut arr = [T::default(); N];
-        for chunk_x in self {
-            for (iy, chunk_y) in chunk_x.iter().enumerate() {
-                let start = iy * X;
-                let end = start + X;
-                arr[start..end].copy_from_slice(chunk_y);
-            }
+        unsafe {
+            let out = (&raw const self).cast::<[T; N]>().read();
+            let _ = self;
+            out
         }
-        arr
+    }
+}
+
+impl<
+        T: Copy + Unflatten,
+        const W: usize,
+        const X: usize,
+        const Y: usize,
+        const Z: usize,
+        const N: usize,
+    > Flatten<N> for [[[[T; X]; Y]; Z]; W]
+{
+    type Flattened = [T; N];
+
+    fn flatten(self) -> Self::Flattened {
+        const {
+            assert!(N == X * Y * Z * W, "flattenning to an invalid length");
+        }
+
+        unsafe {
+            let out = (&raw const self).cast::<[T; N]>().read();
+            let _ = self;
+            out
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<T: Default + Copy + Unflatten, const N: usize> FlatBox<N> for [T; N] {
+    fn flat_box(&self) -> alloc::boxed::Box<Self::Flattened> {
+        let mut uninit = alloc::boxed::Box::<[T; N]>::new_uninit();
+        unsafe {
+            uninit
+                .as_mut_ptr()
+                .copy_from_nonoverlapping(core::ptr::from_ref(self).cast(), 1);
+            uninit.assume_init()
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<T: Copy + Unflatten, const X: usize, const Y: usize, const N: usize> FlatBox<N>
+    for [[T; X]; Y]
+{
+    fn flat_box(&self) -> alloc::boxed::Box<Self::Flattened> {
+        const {
+            assert!(N == X * Y, "flattenning to an invalid length");
+        }
+
+        let mut uninit = alloc::boxed::Box::<[T; N]>::new_uninit();
+        unsafe {
+            uninit
+                .as_mut_ptr()
+                .copy_from_nonoverlapping(core::ptr::from_ref(self).cast(), 1);
+            uninit.assume_init()
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<T: Unflatten + Copy, const X: usize, const Y: usize, const Z: usize, const N: usize> FlatBox<N>
+    for [[[T; X]; Y]; Z]
+{
+    fn flat_box(&self) -> alloc::boxed::Box<Self::Flattened> {
+        const {
+            assert!(N == X * Y * Z, "flattenning to an invalid length");
+        }
+
+        let mut uninit = alloc::boxed::Box::<[T; N]>::new_uninit();
+        unsafe {
+            uninit
+                .as_mut_ptr()
+                .copy_from_nonoverlapping(core::ptr::from_ref(self).cast(), 1);
+            uninit.assume_init()
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<
+        T: Copy + Unflatten,
+        const W: usize,
+        const X: usize,
+        const Y: usize,
+        const Z: usize,
+        const N: usize,
+    > FlatBox<N> for [[[[T; X]; Y]; Z]; W]
+{
+    fn flat_box(&self) -> alloc::boxed::Box<Self::Flattened> {
+        const {
+            assert!(N == X * Y * Z * W, "flattenning to an invalid length");
+        }
+
+        let mut uninit = alloc::boxed::Box::<[T; N]>::new_uninit();
+        unsafe {
+            uninit
+                .as_mut_ptr()
+                .copy_from_nonoverlapping(core::ptr::from_ref(self).cast(), 1);
+            uninit.assume_init()
+        }
     }
 }
 
@@ -186,7 +282,7 @@ impl<T: Default + Copy + Unflatten, const N: usize> StaticShape<1> for [T; N] {
 
 impl<T: Default + Copy + Unflatten, const X: usize, const Y: usize> StaticShape<2> for [[T; X]; Y] {
     fn sliced_shape(&self) -> &[usize; 2] {
-        &[X, Y]
+        &[Y, X]
     }
 }
 
@@ -194,7 +290,20 @@ impl<T: Default + Copy + Unflatten, const X: usize, const Y: usize, const Z: usi
     for [[[T; X]; Y]; Z]
 {
     fn sliced_shape(&self) -> &[usize; 3] {
-        &[X, Y, Z]
+        &[Z, Y, X]
+    }
+}
+
+impl<
+        T: Default + Copy + Unflatten,
+        const W: usize,
+        const X: usize,
+        const Y: usize,
+        const Z: usize,
+    > StaticShape<4> for [[[[T; X]; Y]; Z]; W]
+{
+    fn sliced_shape(&self) -> &[usize; 4] {
+        &[W, Z, Y, X]
     }
 }
 
@@ -244,7 +353,7 @@ where
     }
 
     fn zeros_like(&self) -> Self {
-        Self::new(&[self.len()])
+        Self::new(self.shape())
     }
 }
 
@@ -267,7 +376,9 @@ where
     }
 
     fn zeros_like(&self) -> Self {
-        Self::new([self.len(); D])
+        use tensor_optim::ConstTensorOps;
+
+        Self::new(*self.shape_array())
     }
 }
 
@@ -304,7 +415,14 @@ where
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Self(self.0 + rhs.0)
+        #[cfg(feature = "no_stack")]
+        {
+            Self(self.0 + &rhs.0)
+        }
+        #[cfg(not(feature = "no_stack"))]
+        {
+            Self(self.0 + rhs.0)
+        }
     }
 }
 
@@ -356,7 +474,14 @@ where
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        Self(self.0 - rhs.0)
+        #[cfg(feature = "no_stack")]
+        {
+            Self(self.0 - &rhs.0)
+        }
+        #[cfg(not(feature = "no_stack"))]
+        {
+            Self(self.0 - rhs.0)
+        }
     }
 }
 
@@ -386,7 +511,6 @@ where
     }
 }
 
-//
 #[cfg(feature = "dyntensor")]
 impl<T> Mul<Self> for Tensor<T>
 where
@@ -409,7 +533,14 @@ where
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        Self(self.0 * rhs.0)
+        #[cfg(feature = "no_stack")]
+        {
+            Self(self.0 * &rhs.0)
+        }
+        #[cfg(not(feature = "no_stack"))]
+        {
+            Self(self.0 * rhs.0)
+        }
     }
 }
 
@@ -461,7 +592,14 @@ where
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
-        Self(self.0 / rhs.0)
+        #[cfg(feature = "no_stack")]
+        {
+            Self(self.0 / &rhs.0)
+        }
+        #[cfg(not(feature = "no_stack"))]
+        {
+            Self(self.0 / rhs.0)
+        }
     }
 }
 
@@ -491,6 +629,182 @@ where
     }
 }
 
+#[cfg(feature = "dyntensor")]
+impl<T> AddAssign<Self> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> AddAssign<Self> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> AddAssign<T> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn add_assign(&mut self, rhs: T) {
+        self.0 += rhs;
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> AddAssign<T> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn add_assign(&mut self, rhs: T) {
+        self.0 += rhs;
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> SubAssign<Self> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0;
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> SubAssign<Self> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0;
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> SubAssign<T> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn sub_assign(&mut self, rhs: T) {
+        self.0 -= rhs;
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> SubAssign<T> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn sub_assign(&mut self, rhs: T) {
+        self.0 -= rhs;
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> MulAssign<Self> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn mul_assign(&mut self, rhs: Self) {
+        self.0 *= rhs.0;
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> MulAssign<Self> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn mul_assign(&mut self, rhs: Self) {
+        self.0 *= rhs.0;
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> MulAssign<T> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn mul_assign(&mut self, rhs: T) {
+        self.0 *= rhs;
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> MulAssign<T> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn mul_assign(&mut self, rhs: T) {
+        self.0 *= rhs;
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> DivAssign<Self> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn div_assign(&mut self, rhs: Self) {
+        self.0 /= rhs.0;
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> DivAssign<Self> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn div_assign(&mut self, rhs: Self) {
+        self.0 /= rhs.0;
+    }
+}
+
+#[cfg(feature = "dyntensor")]
+impl<T> DivAssign<T> for Tensor<T>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn div_assign(&mut self, rhs: T) {
+        self.0 /= rhs;
+    }
+}
+
+#[cfg(not(feature = "dyntensor"))]
+impl<T, const N: usize, const D: usize> DivAssign<T> for Tensor<T, N, D>
+where
+    T: SimdElement + Primitive + Default,
+    [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>,
+{
+    fn div_assign(&mut self, rhs: T) {
+        self.0 /= rhs;
+    }
+}
+
 /// A simple tensor with decent flexibility.
 ///
 /// It's entirely heap-allocated, so it won't typically
@@ -498,7 +812,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(feature = "dyntensor")]
 #[repr(transparent)]
-pub struct Tensor<T>(DynTensor<T, { FLOAT_LANES }>)
+pub struct Tensor<T>(pub(crate) DynTensor<T, { FLOAT_LANES }>)
 where
     T: SimdElement + Primitive,
     [T; FLOAT_LANES]: NonAssociativeSimd<[T; FLOAT_LANES], T, FLOAT_LANES>;
@@ -543,9 +857,10 @@ where
         const M: usize,
         F: Flatten<N, Flattened = [T; N]> + StaticShape<M>,
     >(
-        arr: &F,
+        arr: F,
     ) -> Self {
-        Self::new(arr.sliced_shape(), &arr.flatten())
+        let shape = *arr.sliced_shape();
+        Self::new(&shape, &arr.flatten())
     }
 }
 
@@ -694,9 +1009,10 @@ where
 /// Although it's fast and memory efficient, it also
 /// lives entirely on the stack.
 #[cfg(not(feature = "dyntensor"))]
+#[allow(private_interfaces)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct Tensor<T, const N: usize, const D: usize>(ArrTensor<T, N, D, { FLOAT_LANES }>)
+pub struct Tensor<T, const N: usize, const D: usize>(ArrTensor<T, N, D>)
 where
     T: SimdElement + Primitive,
     [T; FLOAT_LANES]: AlignedSimd<[T; FLOAT_LANES], T, { FLOAT_LANES }>;
@@ -771,8 +1087,19 @@ where
 {
     /// Parses a tensor from neted arrays.
     #[must_use]
-    pub fn from_arr<F: Flatten<N, Flattened = [T; N]> + StaticShape<2>>(arr: &F) -> Self {
-        Self::new(arr.sliced_shape(), &arr.flatten())
+    pub fn from_arr<F: Flatten<N, Flattened = [T; N]> + StaticShape<2>>(arr: F) -> Self {
+        let shape = *arr.sliced_shape();
+        let data = arr.flatten();
+        Self::from_arrtensor(ArrTensor::with_data(shape, data))
+    }
+
+    /// Parses a tensor from neted arrays.
+    #[must_use]
+    #[cfg(feature = "alloc")]
+    pub fn copy_arr<F: FlatBox<N, Flattened = [T; N]> + StaticShape<2>>(arr: &F) -> Self {
+        let shape = *arr.sliced_shape();
+        let data = arr.flat_box();
+        Self::from_arrtensor(ArrTensor::box_data(shape, data))
     }
 }
 
@@ -789,12 +1116,29 @@ where
     /// The product of each entry in `shape` must be equal to the length of `data` or the constructor will panic at runtime.
     #[must_use]
     pub fn new(shape: &[usize; D], data: &[T; N]) -> Self {
-        Self(ArrTensor::with_data(*shape, *data))
+        #[cfg(feature = "no_stack")]
+        {
+            use core::mem::transmute;
+            use alloc::boxed::Box;
+            use lazy_simd::simd::Simd;
+
+            let mut boxed = Box::<Simd<T, N, { FLOAT_LANES }>>::new_uninit();
+            let ptr = boxed.as_mut_ptr().cast::<[T; N]>();
+            unsafe {
+                ptr.copy_from_nonoverlapping(data, 1);
+            }
+            Self(ArrTensor::box_data(*shape, unsafe { transmute::<Box<Simd<T, N, { FLOAT_LANES }>>, Box<[T; N]>>( boxed.assume_init()) }))
+        }
+        #[cfg(not(feature = "no_stack"))]
+        {
+            Self(ArrTensor::with_data(*shape, *data))
+        }
     }
 
     /// Constructs a new `Tensor<T>` from the provided Tensor.
     #[must_use]
-    pub const fn from_arrtensor(tensor: ArrTensor<T, N, D, { FLOAT_LANES }>) -> Self {
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn from_arrtensor(tensor: ArrTensor<T, N, D, { FLOAT_LANES }>) -> Self {
         Self(tensor)
     }
 
@@ -825,7 +1169,7 @@ where
     #[must_use]
     pub fn map<U, F>(&self, f: F) -> Tensor<U, N, D>
     where
-        F: FnMut(T) -> U,
+        F: FnMut(&T) -> U,
         U: SimdElement + Primitive + Default,
         [U; FLOAT_LANES]: AlignedSimd<[U; FLOAT_LANES], U, { FLOAT_LANES }>,
     {
@@ -836,7 +1180,7 @@ where
     #[must_use]
     pub fn zip_map<U, V, F>(&self, other: &Tensor<U, N, D>, f: F) -> Tensor<V, N, D>
     where
-        F: FnMut(T, U) -> V,
+        F: FnMut(&T, &U) -> V,
         U: SimdElement + Primitive + Default,
         [U; FLOAT_LANES]: AlignedSimd<[U; FLOAT_LANES], U, { FLOAT_LANES }>,
         V: SimdElement + Primitive + Default,
@@ -916,8 +1260,7 @@ where
     }
 
     fn zeros_like(&self) -> Self {
-        use tensor_optim::ConstTensorOps;
-        Self(ArrTensor::new(*self.shape_array()))
+        Self(self.0.zeros_like())
     }
 }
 

@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use crate::nn::tensors::Tensor;
 use crate::nn::tensors::WithGrad;
 use crate::nn::TensorFloat;
@@ -5,7 +7,7 @@ use crate::nn::TensorFloat;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 #[cfg(not(feature = "alloc"))]
-use box_closure::{Align8, OpaqueFn};
+use box_closure::{Align8, OpaqueFnOnce};
 
 /// Performs a matrix multiplication `C = A × B` on two 2D tensors (`A: m×k`, `B: k×n`),
 /// returning the result tensor and a closure for backpropagation.
@@ -29,7 +31,7 @@ pub fn matmul<'a>(
     b: &'a WithGrad<Tensor<TensorFloat>>,
 ) -> (
     Tensor<TensorFloat>,
-    Box<dyn Fn(Tensor<TensorFloat>) -> (Tensor<TensorFloat>, Tensor<TensorFloat>) + 'a>,
+    Box<dyn FnOnce(Tensor<TensorFloat>) -> (Tensor<TensorFloat>, Tensor<TensorFloat>) + 'a>,
 ) {
     // clone shallow metadata; data is shared or cloned shallowly per your impl
     let a_val = a.get_value();
@@ -95,7 +97,7 @@ pub fn matmul<'a, const A: usize, const B: usize, const OUT: usize, const D: usi
 ) -> (
     Tensor<TensorFloat, OUT, D>,
     Box<
-        dyn Fn(
+        dyn FnOnce(
                 Tensor<TensorFloat, OUT, D>,
             ) -> (Tensor<TensorFloat, A, D>, Tensor<TensorFloat, B, D>)
             + 'a,
@@ -164,7 +166,7 @@ pub fn matmul<'a, const A: usize, const B: usize, const OUT: usize, const D: usi
     b: &'a WithGrad<Tensor<TensorFloat, B, D>>,
 ) -> (
     Tensor<TensorFloat, OUT, D>,
-    OpaqueFn<
+    OpaqueFnOnce<
         'a,
         Tensor<TensorFloat, OUT, D>,
         (Tensor<TensorFloat, A, D>, Tensor<TensorFloat, B, D>),
@@ -190,5 +192,5 @@ pub fn matmul<'a, const A: usize, const B: usize, const OUT: usize, const D: usi
         (grad_wrt_a, grad_wrt_b)
     };
 
-    (out, OpaqueFn::new(back))
+    (out, OpaqueFnOnce::new(back))
 }
