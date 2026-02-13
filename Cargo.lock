@@ -403,6 +403,8 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 [[package]]
 name = "lazy_simd"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7baf173bded478e5bcab1e1bc25b64dfe734da83ab72d7e55a18a2c834301e2d"
 dependencies = [
  "num-traits",
 ]
@@ -801,7 +803,9 @@ dependencies = [
 
 [[package]]
 name = "tensor_optim"
-version = "0.3.0"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "207156a2bf8cf01bf345abed6a5dd0ec8e8e7e997e6efb9f19f549ae93a399b8"
 dependencies = [
  "lazy_simd",
 ]

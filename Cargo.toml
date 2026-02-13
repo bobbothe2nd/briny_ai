@@ -38,9 +38,9 @@ cuda = ["wgpu", "std"]
 
 [dependencies]
 briny = "0.4.0"
-lazy_simd = { path = "../lazy-simd" }
+lazy_simd = "0.3.0"
 box_closure = "0.1.0"
-tensor_optim =  { path = "../SAFE/Projects/tensor_optim" }
+tensor_optim =  "0.4.0"
 libm = "0.2.15"
 crc32fast = { version = "1.5.0", default-features = false, optional = true }
 lazy_static = { version = "1.5.0", default-features = false, optional = true }
